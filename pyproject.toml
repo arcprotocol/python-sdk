@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arc-sdk"
+version = "1.0.0"
+description = "Python implementation of the Agent Remote Communication (ARC) Protocol"
+readme = "README.md"
+authors = [{name = "Moein Roghani", email = "moein.roghani@proton.me"}]
+license = {text = "Apache-2.0"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Environment :: Web Environment",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Communications",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Distributed Computing",
+    "Topic :: System :: Networking",
+    "Typing :: Typed",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "pydantic>=2.0.0",
+    "httpx>=0.25.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "jsonschema>=4.19.0",
+    "authlib>=1.2.0",
+    "python-jose[cryptography]>=3.3.0",
+    "python-dotenv>=1.0.0",
+    "typer>=0.9.0"
+]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.104.0", "uvicorn[standard]>=0.24.0"]
+client = ["httpx>=0.25.0"]
+dev = ["pytest>=7.0.0", "pytest-asyncio>=0.21.0", "black>=23.0.0", "flake8>=6.0.0"]
+
+[project.scripts]
+arc = "arc.cli:main"
+
+[project.urls]
+Homepage = "https://arc-protocol.org"
+Documentation = "https://docs.arc-protocol.org"
+Repository = "https://github.com/arcprotocol/python-sdk"
+"Bug Tracker" = "https://github.com/arcprotocol/python-sdk/issues"
+"Protocol Specification" = "https://arc-protocol.org/spec"

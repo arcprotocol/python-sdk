@@ -1,0 +1,26 @@
+# Core dependencies
+pydantic>=2.0.0
+httpx>=0.25.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+jsonschema>=4.19.0
+
+# Authentication
+authlib>=1.2.0
+python-jose[cryptography]>=3.3.0
+PyJWT[crypto]>=2.8.0  # JWT validation with cryptographic support
+PyJWKS>=1.0.0  # JWKS client for fetching OAuth2 provider public keys
+
+# Schema handling
+PyYAML>=6.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+typer>=0.9.0
+
+# Optional dependencies (will be in extras_require)
+# pytest>=7.0.0
+# pytest-asyncio>=0.21.0
+# black>=23.0.0
+# flake8>=6.0.0
+# mypy>=1.5.0

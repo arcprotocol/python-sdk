@@ -1,0 +1,12 @@
+include README.md
+include LICENSE
+include requirements.txt
+recursive-include arc *.py
+recursive-include arc/schemas *.yaml
+recursive-include arc/schemas *.yml
+recursive-include arc/schemas *.json
+recursive-include docs *.md
+recursive-include examples *.py
+recursive-include examples *.json
+recursive-include examples *.md
+exclude tests/*
