@@ -6,14 +6,17 @@ Provides utilities for sending streaming responses using the SSE protocol.
 
 import json
 import asyncio
-from typing import Dict, Any, Optional, AsyncIterable, Union
+from typing import Dict, Any, Optional, AsyncIterable, Union, Callable, TypeVar, Generator
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 from starlette.types import Send
 
+T = TypeVar('T')
+
 
 class SSEResponse(StreamingResponse):
+    # Make sure it's recognized as a StreamingResponse by the server
     """
     Server-Sent Events (SSE) streaming response.
     
@@ -135,3 +138,63 @@ def create_chat_stream(
             }
     
     return SSEResponse(sse_events())
+
+
+def create_sse_response(content_generator: AsyncIterable[str]) -> SSEResponse:
+    """
+    Create a Server-Sent Events (SSE) response from a content generator.
+    
+    This is a general-purpose function to create an SSE response from any
+    content generator that yields formatted SSE event strings.
+    
+    Args:
+        content_generator: Async generator yielding formatted SSE event strings
+        
+    Returns:
+        SSE streaming response
+    """
+    async def sse_stream():
+        async for event_str in content_generator:
+            # The generator should already provide properly formatted SSE event strings
+            # We just pass them through as is
+            yield {
+                "raw": True,  # Flag to indicate pre-formatted event
+                "content": event_str
+            }
+    
+    # Create a custom wrapper to handle pre-formatted events
+    class FormattedSSEResponse(SSEResponse):
+        def _format_sse_event(self, chunk: Dict[str, Any]) -> str:
+            # If this is a pre-formatted event string, return it directly
+            if chunk.get("raw"):
+                return chunk.get("content", "")
+            # Otherwise, format normally
+            return super()._format_sse_event(chunk)
+    
+    return FormattedSSEResponse(sse_stream())
+
+
+def stream_event(event_type: str, data: Dict[str, Any]) -> str:
+    """
+    Format an event and data as a SSE event string.
+    
+    Args:
+        event_type: Type of event (e.g., 'stream', 'done')
+        data: Event data to send
+        
+    Returns:
+        Formatted SSE event string
+    """
+    # Format as SSE
+    formatted = f"event: {event_type}\n"
+    
+    # Convert data to JSON string
+    if isinstance(data, (dict, list)):
+        data_str = json.dumps(data)
+    else:
+        data_str = str(data)
+        
+    # Add data line
+    formatted += f"data: {data_str}\n\n"
+    
+    return formatted

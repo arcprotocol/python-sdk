@@ -11,7 +11,7 @@ import json
 import uuid
 from typing import Dict, Callable, Optional, Any, List, Union
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .sse import SSEResponse, create_chat_stream
@@ -284,6 +284,14 @@ class ARCServer:
                 if "traceId" in body:
                     response["traceId"] = body["traceId"]
                 
+                # Check if the handler returned a Response object directly
+                # (e.g., a streaming response)
+                if isinstance(result, StreamingResponse):
+                    # Return streaming responses directly without wrapping
+                    logger.info(f"Returning streaming response for method {method}")
+                    return result
+                
+                # Normal JSON response
                 return JSONResponse(content=response)
                 
             except ARCException as e:

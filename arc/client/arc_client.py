@@ -91,7 +91,7 @@ class ARCClient:
         headers = {
             "Content-Type": "application/arc+json",
             "Accept": "application/arc+json, text/event-stream",
-            "User-Agent": f"arc-sdk-python/{self.__module__.__version__}"
+            "User-Agent": "arc-sdk-python"
         }
         
         if self.token:
@@ -145,6 +145,7 @@ class ARCClient:
                 # For streaming responses, return an async generator
                 headers = self._get_headers()
                 headers['Accept'] = 'text/event-stream'
+                headers['Content-Type'] = 'text/event-stream'
                 return stream_response(
                     client=self.http_client,
                     endpoint=self.endpoint,
@@ -421,6 +422,7 @@ class TaskMethods:
             ...         "parts": [{"type": "TextPart", "content": "Add financial section"}]
             ...     }
             ... )
+            >>> success = response["result"]["success"]
         """
         params = {
             "taskId": task_id,
@@ -461,11 +463,11 @@ class TaskMethods:
             Task data response
             
         Example:
-            >>> task = await client.task.info(
+            >>> response = await client.task.info(
             ...     target_agent="doc-analyzer-01",
             ...     task_id="task-12345"
             ... )
-            >>> status = task["result"]["task"]["status"]
+            >>> status = response["result"]["task"]["status"]
         """
         params = {
             "taskId": task_id,
@@ -510,6 +512,7 @@ class TaskMethods:
             ...     task_id="task-12345",
             ...     reason="Priority changed"
             ... )
+            >>> canceled_status = response["result"]["task"]["status"]  # Should be "CANCELED"
         """
         params = {
             "taskId": task_id
@@ -552,13 +555,13 @@ class TaskMethods:
             Subscription response
             
         Example:
-            >>> subscription = await client.task.subscribe(
+            >>> response = await client.task.subscribe(
             ...     target_agent="doc-analyzer-01",
             ...     task_id="task-12345",
             ...     callback_url="https://myapp.com/webhooks/tasks",
             ...     events=["TASK_COMPLETED", "TASK_FAILED"]
             ... )
-            >>> subscription_id = subscription["result"]["subscription"]["subscriptionId"]
+            >>> subscription_id = response["result"]["subscription"]["subscriptionId"]
         """
         params = {
             "taskId": task_id,
@@ -670,14 +673,14 @@ class ChatMethods:
             Chat start response
             
         Example:
-            >>> chat = await client.chat.start(
+            >>> response = await client.chat.start(
             ...     target_agent="chat-agent-01",
             ...     initial_message={
             ...         "role": "user",
             ...         "parts": [{"type": "TextPart", "content": "Hello, I need help"}]
             ...     }
             ... )
-            >>> chat_id = chat["result"]["chat"]["chatId"]
+            >>> chat_id = response["result"]["chat"]["chatId"]
         """
         params = {
             "initialMessage": initial_message
@@ -735,6 +738,7 @@ class ChatMethods:
             ...         "parts": [{"type": "TextPart", "content": "What's the weather?"}]
             ...     }
             ... )
+            >>> agent_response = response["result"]["chat"]["message"]["parts"][0]["content"]
         """
         params = {
             "chatId": chat_id,
@@ -782,6 +786,7 @@ class ChatMethods:
             ...     chat_id="chat-67890",
             ...     reason="Conversation completed"
             ... )
+            >>> status = response["result"]["chat"]["status"]  # Should be "CLOSED"
         """
         params = {
             "chatId": chat_id

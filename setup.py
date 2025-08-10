@@ -18,7 +18,7 @@ def read_requirements():
 
 setup(
     name="arc-sdk",
-    version="1.0.0",
+    version="1.1.0",
     author="Moein Roghani",
     author_email="moein.roghani@proton.me",
     description="Python implementation of the Agent Remote Communication (ARC) Protocol",

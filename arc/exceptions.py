@@ -202,6 +202,47 @@ class ARCChatError(ARCException):
         self.code = code
 
 
+# === Stream Errors ===
+
+class ARCStreamError(ARCException):
+    """Base class for stream-related errors (-43100 to -43199)"""
+    def __init__(self, code: int, message: str, details: dict = None):
+        super().__init__(message, str(code), details)
+        self.code = code
+
+
+class StreamNotFoundError(ARCStreamError):
+    """Stream not found"""
+    def __init__(self, stream_id: str, message: str = None, details: dict = None):
+        details = details or {}
+        details["stream_id"] = stream_id
+        super().__init__(-43101, message or f"Stream not found: {stream_id}", details)
+
+
+class StreamAlreadyClosedError(ARCStreamError):
+    """Stream already closed"""
+    def __init__(self, stream_id: str, message: str = None, details: dict = None):
+        details = details or {}
+        details["stream_id"] = stream_id
+        super().__init__(-43102, message or f"Stream already closed: {stream_id}", details)
+
+
+class InvalidStreamMessageError(ARCStreamError):
+    """Invalid stream message"""
+    def __init__(self, stream_id: str, message: str = None, details: dict = None):
+        details = details or {}
+        details["stream_id"] = stream_id
+        super().__init__(-43103, message or f"Invalid stream message: {stream_id}", details)
+
+
+class StreamTimeoutError(ARCStreamError):
+    """Stream timed out"""
+    def __init__(self, stream_id: str, message: str = None, details: dict = None):
+        details = details or {}
+        details["stream_id"] = stream_id
+        super().__init__(-43104, message or f"Stream timed out: {stream_id}", details)
+
+
 class ChatNotFoundError(ARCChatError):
     """Chat not found"""
     def __init__(self, chat_id: str, message: str = None, details: dict = None):

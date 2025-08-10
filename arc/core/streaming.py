@@ -2,21 +2,282 @@
 ARC Streaming Module
 
 Provides support for real-time streaming communication in the ARC protocol.
+Includes utilities for handling streaming responses, content generators, and
+standardized streaming patterns.
 """
 
 import asyncio
 import json
 import logging
 import uuid
-from typing import Dict, Any, Optional, Union, List, Callable, AsyncGenerator
+import time
+from typing import Dict, Any, Optional, Union, List, Callable, AsyncGenerator, AsyncIterable
 
 from ..exceptions import (
     StreamNotFoundError, StreamAlreadyClosedError, InvalidStreamMessageError,
     StreamTimeoutError
 )
+from ..server.sse import stream_event
 
 
 logger = logging.getLogger(__name__)
+
+
+# --- New Core Streaming Utilities ---
+
+async def stream_content_word_by_word(text: str, delay: float = 0.1) -> AsyncGenerator[str, None]:
+    """
+    Generate a stream of text content word by word.
+    
+    This utility breaks a text string into words and yields one word at a time,
+    with configurable delay between words to simulate natural typing.
+    
+    Args:
+        text: Full text content to stream
+        delay: Delay between words in seconds (default: 0.1)
+        
+    Yields:
+        Incrementally built text string, one word at a time
+    """
+    words = text.split()
+    current_text = ""
+    
+    for i, word in enumerate(words):
+        # Add space before words except the first one
+        if i > 0:
+            current_text += " "
+        current_text += word
+        yield current_text
+        await asyncio.sleep(delay)
+
+
+async def stream_content_chunk_by_chunk(chunks: List[str], delay: float = 0.1) -> AsyncGenerator[str, None]:
+    """
+    Generate a stream of pre-defined content chunks.
+    
+    Args:
+        chunks: List of content chunks to stream in sequence
+        delay: Delay between chunks in seconds (default: 0.1)
+        
+    Yields:
+        Each chunk in sequence
+    """
+    for chunk in chunks:
+        yield chunk
+        await asyncio.sleep(delay)
+
+
+async def generate_sse_events(
+    chat_id: str,
+    content_generator: AsyncIterable[str],
+    role: str = "agent",
+    request_id: Optional[str] = None,
+    content_type: str = "TextPart"
+) -> AsyncGenerator[str, None]:
+    """
+    Generate Server-Sent Events (SSE) for streaming chat content.
+    
+    This helper transforms a content generator into properly formatted
+    SSE events following the ARC protocol streaming format.
+    
+    Args:
+        chat_id: Chat identifier
+        content_generator: Async generator yielding content strings
+        role: Message role (default: "agent")
+        request_id: Original request ID for the done event
+        content_type: Content part type (default: "TextPart")
+        
+    Yields:
+        Properly formatted SSE event strings ready for streaming
+    """
+    # Initial event with empty content
+    initial_data = {
+        "chatId": chat_id,
+        "message": {
+            "role": role,
+            "parts": []
+        }
+    }
+    yield stream_event("stream", initial_data)
+    
+    # Stream each content update
+    async for content in content_generator:
+        chat_data = {
+            "chatId": chat_id,
+            "message": {
+                "role": role,
+                "parts": [{
+                    "type": content_type,
+                    "content": content
+                }]
+            }
+        }
+        # Use stream_event to format SSE event
+        yield stream_event("stream", chat_data)
+    
+    # Final done event
+    done_data = {"chatId": chat_id}
+    if request_id:
+        done_data["requestId"] = request_id
+    yield stream_event("done", done_data)
+
+
+class ContentStreamGenerator:
+    """
+    Utility class for generating content streams with different strategies.
+    
+    This class provides methods for creating content generators using
+    various streaming strategies (word by word, character by character, etc.)
+    suitable for use with SSE streaming responses.
+    """
+    
+    @staticmethod
+    async def word_by_word(
+        text: str, 
+        delay: float = 0.1
+    ) -> AsyncGenerator[str, None]:
+        """Stream text content word by word"""
+        async for content in stream_content_word_by_word(text, delay):
+            yield content
+    
+    @staticmethod
+    async def char_by_char(
+        text: str, 
+        delay: float = 0.05
+    ) -> AsyncGenerator[str, None]:
+        """Stream text content character by character"""
+        current = ""
+        for char in text:
+            current += char
+            yield current
+            await asyncio.sleep(delay)
+    
+    @staticmethod
+    async def chunk_by_chunk(
+        chunks: List[str],
+        delay: float = 0.1
+    ) -> AsyncGenerator[str, None]:
+        """Stream pre-defined chunks in sequence"""
+        async for content in stream_content_chunk_by_chunk(chunks, delay):
+            yield content
+            
+    @staticmethod
+    async def from_parts(
+        parts: List[Dict[str, Any]],
+        delay: float = 0.1
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream text content from message parts.
+        
+        Extracts text content from TextPart message parts and streams it.
+        """
+        full_text = ""
+        for part in parts:
+            if part.get("type") == "TextPart" and "content" in part:
+                full_text += part["content"]
+        
+        async for content in stream_content_word_by_word(full_text, delay):
+            yield content
+
+
+async def create_chat_stream_generator(
+    chat_id: str,
+    message: Dict[str, Any],
+    request_id: Optional[str] = None,
+    delay: float = 0.1
+) -> AsyncGenerator[str, None]:
+    """
+    Create a generator for streaming a chat message using the ARC protocol format.
+    
+    This is a high-level utility that takes a chat message and returns a generator
+    that yields properly formatted SSE event strings following the ARC protocol.
+    
+    Args:
+        chat_id: Chat identifier
+        message: Full message object with role and parts
+        request_id: Request ID for the done event
+        delay: Delay between content updates
+        
+    Returns:
+        Async generator yielding SSE event strings
+    """
+    # Extract parts from the message
+    parts = message.get("parts", [])
+    role = message.get("role", "agent")
+    
+    # Create content generator based on parts
+    content_gen = ContentStreamGenerator.from_parts(parts, delay)
+    
+    # Create SSE event generator from content
+    async for event in generate_sse_events(chat_id, content_gen, role, request_id):
+        yield event
+
+
+# --- Client-side Streaming Parser ---
+
+class SSEParser:
+    """
+    Parser for Server-Sent Events (SSE) received from an ARC server.
+    
+    This utility helps client applications parse and process SSE
+    events according to the ARC protocol format.
+    """
+    
+    @staticmethod
+    def parse_chunk(chunk: Union[str, Dict[str, Any]]) -> tuple:
+        """
+        Parse an SSE chunk into event type and data.
+        
+        Handles both dictionary objects and string SSE formats.
+        
+        Args:
+            chunk: Raw chunk from SSE stream (string or dict)
+            
+        Returns:
+            Tuple of (event_type, event_data)
+        """
+        event_type = None
+        event_data = {}
+        
+        # If it's already a dictionary (e.g., from httpx parsing)
+        if isinstance(chunk, dict):
+            event_type = chunk.get('event')
+            event_data = chunk.get('data', {})
+            return event_type, event_data
+            
+        # If it's a string in SSE format: "event: type\ndata: {...}"
+        elif isinstance(chunk, str) and chunk.startswith('event: '):
+            lines = chunk.strip().split('\n')
+            
+            for line in lines:
+                if line.startswith('event: '):
+                    event_type = line[7:].strip()
+                elif line.startswith('data: '):
+                    try:
+                        data_str = line[6:].strip()
+                        event_data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        # If not valid JSON, treat as raw string
+                        event_data = {'raw': data_str}
+        
+        return event_type, event_data
+    
+    @staticmethod
+    def extract_content(event_data: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract text content from an ARC protocol SSE message.
+        
+        Args:
+            event_data: Parsed event data
+            
+        Returns:
+            Extracted text content or None if not found
+        """
+        if "message" in event_data and "parts" in event_data["message"]:
+            for part in event_data["message"]["parts"]:
+                if part.get("type") == "TextPart" and "content" in part:
+                    return part["content"]
+        return None
 
 
 class StreamManager:

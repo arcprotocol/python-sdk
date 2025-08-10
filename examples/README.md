@@ -1,125 +1,144 @@
-# ARC Protocol Python SDK Examples
+# ARC Protocol SDK Examples
 
-This directory contains example applications demonstrating how to use the ARC (Agent Remote Communication) Protocol Python SDK. These examples are organized to show both server and client implementations, as well as specialized use cases.
+This directory contains examples and test scripts for the ARC Protocol Python SDK.
 
-## Directory Structure
+## Server Examples
 
-- **`server/`**: Server implementations
-  - `basic_server.py` - A complete server that handles both task and stream methods
+The `server` directory contains an example server implementation that can be used to test the SDK locally.
 
-- **`client/`**: Client implementations
-  - `basic_client.py` - A simple client that demonstrates connecting to an ARC server
-
-- **`task_examples/`**: Task-based communication examples (client-side)
-  - `create_task.py` - Shows basic task creation and management
-  - `multi_agent_workflow.py` - Orchestrates a complex workflow with multiple agents
-
-- **`chat_examples/`**: Chat communication examples (client-side)
-  - `realtime_chat.py` - Implements a simple chat application using real-time communication
-  - `streaming_response.py` - Shows how to handle streaming responses using SSE
-
-## Getting Started
-
-The simplest way to start using these examples is to run the basic server and client:
-
-1. Start the server:
-   ```bash
-   cd server
-   python basic_server.py
-   ```
-
-2. In a new terminal, run the client:
-   ```bash
-   cd client
-   python basic_client.py
-   ```
-
-## Prerequisites
-
-Before running these examples, you'll need:
-
-1. Python 3.7+
-2. For real-world usage: An OAuth2 provider (for authentication)
-3. For the use-case examples: ARC-compatible agents to communicate with
-
-## Configuration
-
-Most examples use environment variables for configuration:
+### Running the Test Server
 
 ```bash
-# Server Configuration
-export SERVER_PORT=8000          # Port for the server to listen on
-export ENABLE_AUTH=False         # Enable/disable auth for local testing
-
-# Client Configuration
-export ARC_SERVER_URL=http://localhost:8000    # URL of the ARC server
-export ARC_TARGET_AGENT=arc-example-agent      # Agent ID of the target
-export ARC_REQUEST_AGENT=arc-example-client    # Your client's agent ID
-
-# OAuth2 Configuration (for production use)
-export OAUTH_CLIENT_ID=your-client-id
-export OAUTH_CLIENT_SECRET=your-client-secret
-export OAUTH_PROVIDER=auth0|google|azure|okta  # or 'custom' for custom provider
-export OAUTH_SCOPE="arc.agent.caller arc.task.controller"  # Adjust scopes as needed
-
-# For custom OAuth provider
-export OAUTH_TOKEN_URL=https://your-provider.com/oauth/token
+cd examples/server
+python arc_test_server.py
 ```
 
-For local testing, you can use HTTP URLs and dev tokens, but the examples will warn about insecure connections.
+This will start a test server on `http://localhost:8000/arc` that implements all standard ARC Protocol methods and responds with realistic mock data.
 
-## How the Examples Work
+## Client Examples
 
-### Server-Client Pattern
+The `client` directory contains test scripts for each method in the ARC Protocol.
 
-The ARC protocol follows a server-client pattern:
+### Running the Full Test Suite
 
-1. **Server**: Implements handlers for the ARC methods (task.create, chat.start, etc.)
-2. **Client**: Connects to the server and calls these methods
+To run all tests against the local server:
 
-To test, you always need to run a server first, then connect with a client.
+```bash
+cd examples/client
+python arc_client_test.py
+```
 
-### Available Examples
+You can also run specific test suites:
 
-#### Basic Server and Client
+```bash
+# Run only task-related tests
+python arc_client_test.py --tests task
 
-- **`server/basic_server.py`**: A complete server implementation supporting all ARC methods
-  - Handles both task and chat methods
-  - Includes mock implementations for testing
-  - Can be extended with real business logic
+# Run only chat-related tests
+python arc_client_test.py --tests chat
+```
 
-- **`client/basic_client.py`**: A simple client that tests all available methods
-  - Shows how to create the client and authenticate
-  - Demonstrates calling all supported methods
-  - Handles responses and errors
+### Testing Individual Methods
 
-#### Task Examples
+Each method of the ARC Protocol has a dedicated test script:
 
-- **`task_examples/create_task.py`**: Shows basic task creation and management
-  - Demonstrates: task.create, task.send, task.get
+#### Task Methods
 
-- **`task_examples/multi_agent_workflow.py`**: Orchestrates a complex workflow with multiple agents
-  - Demonstrates: Coordinating multiple agents, parallel processing, result aggregation
+1. **task.create** - Create a new task
+   ```bash
+   python test_task_create.py
+   ```
 
-#### Chat Examples
+2. **task.info** - Get information about a task
+   ```bash
+   python test_task_info.py <task_id>
+   ```
 
-- **`chat_examples/realtime_chat.py`**: Implements a simple chat application using real-time communication
-  - Demonstrates: chat.start, chat.message, chat.end
+3. **task.send** - Send a message to a task
+   ```bash
+   python test_task_send.py <task_id> --message "Additional information"
+   ```
 
-- **`chat_examples/streaming_response.py`**: Shows how to handle streaming responses using SSE
-  - Demonstrates: chat.start with streaming, chat.message with streaming, chat.end
+4. **task.cancel** - Cancel a task
+   ```bash
+   python test_task_cancel.py <task_id> --reason "No longer needed"
+   ```
 
-## Key Concepts
+5. **task.subscribe** - Subscribe to task events
+   ```bash
+   python test_task_subscribe.py <task_id> --callback "https://example.com/webhook"
+   ```
 
-- **Authentication**: OAuth2 client credentials flow
-- **Task Operations**: Creating, updating, and retrieving asynchronous tasks
-- **Chat Operations**: Real-time interactive communication with streaming support
-- **Multi-Agent Workflows**: Coordinating multiple specialized agents
-- **Error Handling**: Proper error detection and recovery
-- **Tracing**: Using trace IDs for end-to-end request tracking
+#### Chat Methods
 
-## Additional Resources
+1. **chat.start** - Start a new chat session
+   ```bash
+   python test_chat_start.py
+   ```
 
-- [ARC Protocol Official Specification](https://github.com/arc-protocol/arc-protocol)
-- [Python SDK Documentation](https://docs.arc-protocol.org/python-sdk/)
-- [API Reference](https://docs.arc-protocol.org/python-sdk/api-reference)
+2. **chat.message** - Send a message to an existing chat
+   ```bash
+   python test_chat_message.py <chat_id> --message "Hello there"
+   ```
+
+3. **chat.end** - End a chat session
+   ```bash
+   python test_chat_end.py <chat_id> --reason "Conversation complete"
+   ```
+
+### Testing with Streaming
+
+Some methods support streaming responses. To test streaming:
+
+```bash
+python test_chat_start.py --stream
+python test_chat_message.py <chat_id> --stream
+```
+
+Note: The test server doesn't implement true streaming but provides compatible responses.
+
+## Example Workflow
+
+Here's a typical workflow for testing the complete API:
+
+```bash
+# Start the server (in one terminal)
+cd examples/server
+python arc_test_server.py
+
+# In another terminal, run tests
+cd examples/client
+
+# Create a task
+task_id=$(python test_task_create.py | grep "Task ID:" | awk '{print $3}')
+
+# Get task info
+python test_task_info.py $task_id
+
+# Send a message to the task
+python test_task_send.py $task_id
+
+# Subscribe to task updates
+python test_task_subscribe.py $task_id
+
+# Cancel the task
+python test_task_cancel.py $task_id
+
+# Start a chat
+chat_id=$(python test_chat_start.py | grep "Chat ID:" | awk '{print $3}')
+
+# Send a message to the chat
+python test_chat_message.py $chat_id
+
+# End the chat
+python test_chat_end.py $chat_id
+```
+
+## Advanced Options
+
+All test scripts support additional options:
+
+- `--url` - ARC server endpoint URL (default: http://localhost:8000/arc)
+- `--agent` - Target agent ID (default: test-arc-server)
+- `--client-id` - Client agent ID (default: test-arc-client)
+- `--verbose` or `-v` - Enable verbose output with full responses

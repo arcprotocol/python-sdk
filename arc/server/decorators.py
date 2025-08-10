@@ -22,10 +22,14 @@ logger = logging.getLogger(__name__)
 F = TypeVar('F', bound=Callable[..., Any])
 
 
-def validate_params(schema: Any = None) -> Callable[[F], F]:
+def validate_params(schema: Any = None) -> Union[Callable[[F], F], F]:
     """
     Decorator to validate method parameters against a schema.
     
+    Can be used with or without a schema:
+        @validate_params(TaskCreateParamsModel)  # With schema
+        @validate_params()                      # Without schema
+        
     Args:
         schema: Pydantic model or callable validator
         
@@ -34,6 +38,18 @@ def validate_params(schema: Any = None) -> Callable[[F], F]:
         async def handle_task_create(params, context):
             # params is validated against TaskCreateParamsModel
     """
+    # Handle case when decorator is used without parentheses
+    if callable(schema) and not inspect.isclass(schema):
+        func = schema
+        schema = None
+        
+        @functools.wraps(func)
+        async def direct_wrapper(params: Dict[str, Any], context: Dict[str, Any]) -> Any:
+            return await func(params, context)
+        
+        return cast(F, direct_wrapper)
+    
+    # Normal case with schema
     def decorator(func: F) -> F:
         @functools.wraps(func)
         async def wrapper(params: Dict[str, Any], context: Dict[str, Any]) -> Any:
