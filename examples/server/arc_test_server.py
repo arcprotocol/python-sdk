@@ -29,20 +29,21 @@ from arc.core.streaming import create_chat_stream_generator
 configure_root_logger(level=logging.INFO)
 logger = create_logger("arc-test-server", level=logging.INFO)
 
-# Initialize server
+# Initialize multi-agent server with ChatManager
 server = create_server(
-    agent_id="test-arc-server",
+    server_id="test-arc-server",
     name="ARC Protocol Test Server",
     version="1.0.0",
-    agent_description="Full-featured test server for ARC protocol",
+    server_description="Full-featured multi-agent test server for ARC protocol",
     enable_cors=True,
-    enable_logging=True
+    enable_logging=True,
+    enable_chat_manager=True,
+    chat_manager_agent_id="test-arc-server"
 )
 
-# In-memory storage for tasks, chats, and subscriptions
+# In-memory storage for tasks and subscriptions
 tasks = {}
 subscriptions = {}
-chat_manager = ChatManager("test-arc-server")
 
 # Simulate task progression
 async def process_task_async(task_id):
@@ -147,8 +148,8 @@ async def notify_subscribers(task_id, event, data):
         logger.info(f"Would send notification to {sub['callbackUrl']}: {event}")
         # In real implementation: await send_notification_webhook(sub["callbackUrl"], task_id, event, data)
 
-# Task methods
-@server.method_handler("task.create")
+# Task methods for test agent
+@server.agent_handler("test-arc-server", "task.create")
 @trace_method
 @error_handler
 @validate_params()
@@ -190,7 +191,7 @@ async def handle_task_create(params, context):
         }
     }
 
-@server.method_handler("task.send")
+@server.agent_handler("test-arc-server", "task.send")
 @trace_method
 @error_handler
 @validate_params()
@@ -227,7 +228,7 @@ async def handle_task_send(params, context):
         "message": "Message sent to task successfully"
     }
 
-@server.method_handler("task.info")
+@server.agent_handler("test-arc-server", "task.info")
 @trace_method
 @error_handler
 @validate_params()
@@ -258,7 +259,7 @@ async def handle_task_info(params, context):
         "task": task_copy
     }
 
-@server.method_handler("task.cancel")
+@server.agent_handler("test-arc-server", "task.cancel")
 @trace_method
 @error_handler
 @validate_params()
@@ -305,7 +306,7 @@ async def handle_task_cancel(params, context):
         }
     }
 
-@server.method_handler("task.subscribe")
+@server.agent_handler("test-arc-server", "task.subscribe")
 @trace_method
 @error_handler
 @validate_params()
@@ -342,8 +343,8 @@ async def handle_task_subscribe(params, context):
         "subscription": subscription
     }
 
-# Chat methods
-@server.method_handler("chat.start")
+# Chat methods for test agent
+@server.agent_handler("test-arc-server", "chat.start")
 @trace_method
 @error_handler
 @validate_params()
@@ -354,18 +355,43 @@ async def handle_chat_start(params, context):
     metadata = params.get("metadata", {})
     stream = params.get("stream", False)
     
-    # Create chat
+    # Create chat using ChatManager from context
+    chat_manager = context["chat_manager"]
+    if not chat_manager:
+        raise ValueError("ChatManager not available - enable_chat_manager=True required for chat methods")
+    
     chat_info = chat_manager.create_chat(
         target_agent=context["request_agent"],
         chat_id=chat_id,
         metadata=metadata
     )
     
-    # Add initial message
-    initial_message["timestamp"] = datetime.utcnow().isoformat() + "Z"
-    chat_manager.add_message(chat_id, initial_message)
+    # No need to store initial message - agent handles its own history
     
-    # Create agent response
+    # Handle streaming if requested - generate content dynamically
+    if stream:
+        logger.info(f"Streaming response for chat {chat_id}")
+        
+        # Create a generator that simulates real agent streaming
+        async def agent_content_stream():
+            # This simulates what a real agent would do - generate content as it processes
+            response_parts = [
+                "Hello! ", "This is ", "a test ", "response ", "from the ", 
+                "ARC server. ", "I'm here ", "to help ", "with your ", "request."
+            ]
+            
+            for part in response_parts:
+                # Simulate real agent processing time (LLM token generation, etc.)
+                await asyncio.sleep(0.2)
+                yield part
+        
+        return create_sse_response(create_chat_stream_generator(
+            chat_id=chat_id,
+            content_generator=agent_content_stream(),
+            request_id=context.get("request_id", "unknown")
+        ))
+    
+    # For non-streaming, create complete response
     response_text = "Hello! This is a test response from the ARC server. I'm here to help with your request."
     agent_message = {
         "role": "agent",
@@ -376,37 +402,25 @@ async def handle_chat_start(params, context):
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
     
-    # Add agent response
-    chat_manager.add_message(chat_id, agent_message)
+    # No need to store agent response - agent handles its own history
     
     logger.info(f"Started chat {chat_id} with initial message")
     
-    # Get updated chat info
+    # Get session info (no messages stored)
     chat = chat_manager.get_chat(chat_id)
     
-    # Handle streaming if requested
-    if stream:
-        logger.info(f"Streaming response for chat {chat_id}")
-        return create_sse_response(create_chat_stream_generator(
-            chat_id=chat_id,
-            message=agent_message,
-            request_id=context.get("request_id", "unknown")
-        ))
-    
-    # Return standard response
+    # Return standard response - message is optional but useful for client
     return {
         "type": "chat",
         "chat": {
             "chatId": chat_id,
-            "status": "ACTIVE",
-            "message": agent_message,
-            "participants": chat["participants"],
+            "status": "ACTIVE", 
             "createdAt": chat["createdAt"],
-            "updatedAt": chat["updatedAt"]
+            "message": agent_message  # Optional but contains agent response
         }
     }
 
-@server.method_handler("chat.message")
+@server.agent_handler("test-arc-server", "chat.message")
 @trace_method
 @error_handler
 @validate_params()
@@ -416,17 +430,45 @@ async def handle_chat_message(params, context):
     message = params["message"]
     stream = params.get("stream", False)
     
-    # Check if chat exists
+    # Check if chat exists using ChatManager from context
+    chat_manager = context["chat_manager"]
+    if not chat_manager:
+        raise ValueError("ChatManager not available - enable_chat_manager=True required for chat methods")
+    
     try:
         chat = chat_manager.get_chat(chat_id)
     except Exception as e:
         raise ValueError(f"Chat not found: {chat_id}")
     
-    # Add message to chat
-    message["timestamp"] = datetime.utcnow().isoformat() + "Z"
-    chat_manager.add_message(chat_id, message)
+    # No need to store message - agent handles its own history
     
-    # Create agent response
+    # Handle streaming if requested - generate content dynamically
+    if stream:
+        logger.info(f"Streaming response for chat message in chat {chat_id}")
+        
+        # Create a generator that simulates real agent streaming
+        async def agent_content_stream():
+            # Simulate dynamic content generation with varied responses
+            content_options = [
+                ["I understand ", "your request. ", "Let me provide ", "some information ", "about that."],
+                ["Thanks for ", "your message. ", "Here's my ", "response to ", "your query."],
+                ["I've processed ", "your input. ", "Let me know ", "if you need ", "more details."]
+            ]
+            import random
+            response_parts = random.choice(content_options)
+            
+            for part in response_parts:
+                # Simulate real agent processing time
+                await asyncio.sleep(0.15)
+                yield part
+        
+        return create_sse_response(create_chat_stream_generator(
+            chat_id=chat_id,
+            content_generator=agent_content_stream(),
+            request_id=context.get("request_id", "unknown")
+        ))
+    
+    # For non-streaming, create complete response
     content_options = [
         "I understand your request. Let me provide some information about that.",
         "Thanks for your message. Here's my response to your query.",
@@ -444,35 +486,22 @@ async def handle_chat_message(params, context):
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
     
-    # Add agent response
-    chat_manager.add_message(chat_id, agent_message)
+    # No need to store agent response - agent handles its own history
     
     logger.info(f"Handled message in chat {chat_id}")
     
-    # Get updated chat
-    updated_chat = chat_manager.get_chat(chat_id)
-    
-    # Handle streaming if requested
-    if stream:
-        logger.info(f"Streaming response for chat message in chat {chat_id}")
-        return create_sse_response(create_chat_stream_generator(
-            chat_id=chat_id,
-            message=agent_message,
-            request_id=context.get("request_id", "unknown")
-        ))
-    
-    # Return standard response
+    # Return standard response - message is optional but useful for client
     return {
         "type": "chat",
         "chat": {
             "chatId": chat_id,
             "status": "ACTIVE",
-            "message": agent_message,
-            "updatedAt": updated_chat["updatedAt"]
+            "createdAt": chat["createdAt"],
+            "message": agent_message  # Optional but contains agent response
         }
     }
 
-@server.method_handler("chat.end")
+@server.agent_handler("test-arc-server", "chat.end")
 @trace_method
 @error_handler
 @validate_params()
@@ -481,7 +510,11 @@ async def handle_chat_end(params, context):
     chat_id = params["chatId"]
     reason = params.get("reason", "Chat ended by user")
     
-    # Close the chat
+    # Close the chat using ChatManager from context
+    chat_manager = context["chat_manager"]
+    if not chat_manager:
+        raise ValueError("ChatManager not available - enable_chat_manager=True required for chat methods")
+    
     try:
         chat_result = chat_manager.close_chat(chat_id, reason)
         logger.info(f"Ended chat {chat_id} with reason: {reason}")
@@ -494,9 +527,10 @@ async def handle_chat_end(params, context):
         raise ValueError(f"Failed to end chat: {e}")
 
 if __name__ == "__main__":
-    print(f"Starting ARC Protocol Test Server")
-    print(f"Agent ID: test-arc-server")
-    print(f"Supported methods: {', '.join(server.handlers.keys())}")
+    print(f"Starting ARC Protocol Multi-Agent Test Server")
+    print(f"Server ID: test-arc-server")
+    print(f"Registered agents: {', '.join(server.supported_agents)}")
+    print(f"Total methods: {sum(len(methods) for methods in server.agents.values())}")
     print(f"Listening at: http://localhost:8000/arc")
     print(f"Press Ctrl+C to stop the server")
     server.run(host="0.0.0.0", port=8000)

@@ -15,13 +15,19 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .sse import SSEResponse, create_chat_stream
+from ..core.chat import ChatManager
 
 from ..exceptions import (
     ARCException, InvalidRequestError, ParseError, MethodNotFoundError, 
     InvalidParamsError, InternalError, AuthenticationError, AuthorizationError
 )
 from .middleware import extract_auth_context, cors_middleware, logging_middleware, AuthMiddleware
-from ..auth.jwt_validator import JWTValidator, MultiProviderJWTValidator
+try:
+    from ..auth.jwt_validator import JWTValidator, MultiProviderJWTValidator
+except ImportError:
+    # JWT validators are optional dependencies
+    JWTValidator = None
+    MultiProviderJWTValidator = None
 
 
 logger = logging.getLogger(__name__)
@@ -42,42 +48,54 @@ class ARCServer:
     
     def __init__(
         self, 
-        agent_id: str,
+        server_id: str = "arc-server",
         name: str = None,
         version: str = "1.0.0",
-        agent_description: str = None,
+        server_description: str = None,
         enable_cors: bool = True,
         enable_validation: bool = True,
         enable_logging: bool = True,
-        enable_auth: bool = False
+        enable_auth: bool = False,
+        enable_chat_manager: bool = False,
+        chat_manager_agent_id: Optional[str] = None
     ):
         """
-        Initialize ARC server.
+        Initialize ARC server with multi-agent support.
         
         Args:
-            agent_id: ID of the agent (used for routing, logging, and identification)
-            name: Human-readable name for the agent
-            version: Version of the agent
-            agent_description: Optional description of the agent
+            server_id: ID of the server (for identification and logging)
+            name: Human-readable name for the server
+            version: Version of the server
+            server_description: Optional description of the server
             enable_cors: Enable CORS middleware for web clients
             enable_validation: Enable request validation middleware
             enable_logging: Enable request logging middleware
             enable_auth: Enable OAuth2 authentication middleware
+            enable_chat_manager: Enable ChatManager for chat lifecycle management
+            chat_manager_agent_id: Agent ID for ChatManager (required if enable_chat_manager=True)
         """
-        self.agent_id = agent_id
-        self.name = name or agent_id
+        self.server_id = server_id
+        self.name = name or server_id
         self.version = version
-        self.agent_description = agent_description or f"ARC agent: {agent_id}"
+        self.server_description = server_description or f"ARC multi-agent server: {server_id}"
         
         self.app = FastAPI(
             title=f"{self.name} ARC Server",
-            description=self.agent_description,
+            description=self.server_description,
             version=self.version
         )
         
-        # Method handlers
-        self.handlers: Dict[str, Callable] = {}
-        self.supported_methods: List[str] = []
+        # Multi-agent registry: {agent_id: {method: handler}}
+        self.agents: Dict[str, Dict[str, Callable]] = {}
+        self.supported_agents: List[str] = []
+        
+        # Optional ChatManager for chat lifecycle management
+        self.chat_manager = None
+        if enable_chat_manager:
+            if not chat_manager_agent_id:
+                raise ValueError("chat_manager_agent_id is required when enable_chat_manager=True")
+            self.chat_manager = ChatManager(chat_manager_agent_id)
+            logger.info(f"Enabled ChatManager with agent ID: {chat_manager_agent_id}")
         
         # Authentication configuration
         self.jwt_validator = None
@@ -103,7 +121,7 @@ class ARCServer:
         # Setup routes
         self._setup_routes()
         
-        logger.info(f"ARC Server initialized for agent: {agent_id}")
+        logger.info(f"ARC Server initialized with server ID: {self.server_id}")
     
     def _add_cors_middleware(self):
         """Add CORS middleware for web client support"""
@@ -177,7 +195,7 @@ class ARCServer:
                     error_resp = {
                         "arc": "1.0",
                         "id": body.get("id"),
-                        "responseAgent": self.agent_id,
+                        "responseAgent": "arc-server",
                         "targetAgent": body.get("requestAgent"),
                         "traceId": body.get("traceId"),
                         "result": None,
@@ -189,41 +207,43 @@ class ARCServer:
                     }
                     return JSONResponse(content=error_resp, status_code=400)
                     
-                # Check if this request is for this agent
-                if body["targetAgent"] != self.agent_id:
+                # Check if target agent is registered
+                target_agent = body["targetAgent"]
+                if target_agent not in self.agents:
                     error_resp = {
                         "arc": "1.0",
                         "id": body["id"],
-                        "responseAgent": self.agent_id,
+                        "responseAgent": "arc-server",
                         "targetAgent": body["requestAgent"],
                         "traceId": body.get("traceId"),
                         "result": None,
                         "error": {
                             "code": -41001,
-                            "message": f"Agent not found: {body['targetAgent']}",
+                            "message": f"Agent not found: {target_agent}",
                             "details": {
-                                "requestedAgent": body["targetAgent"],
-                                "currentAgent": self.agent_id
+                                "requestedAgent": target_agent,
+                                "availableAgents": self.supported_agents
                             }
                         }
                     }
                     return JSONResponse(content=error_resp, status_code=404)
                 
-                # Check method
+                # Check if method exists for this agent
                 method = body["method"]
-                if method not in self.handlers:
+                agent_methods = self.agents[target_agent]
+                if method not in agent_methods:
                     error_resp = {
                         "arc": "1.0",
                         "id": body["id"],
-                        "responseAgent": self.agent_id,
+                        "responseAgent": target_agent,
                         "targetAgent": body["requestAgent"],
                         "traceId": body.get("traceId"),
                         "result": None,
                         "error": {
                             "code": -32601,
-                            "message": f"Method not found: {method}",
+                            "message": f"Method {method} not found for agent {target_agent}",
                             "details": {
-                                "supportedMethods": self.supported_methods
+                                "supportedMethods": list(agent_methods.keys())
                             }
                         }
                     }
@@ -243,15 +263,16 @@ class ARCServer:
                     "request_id": body["id"],
                     "method": method,
                     "request_agent": body["requestAgent"],
-                    "target_agent": body["targetAgent"],
+                    "target_agent": target_agent,
                     "trace_id": body.get("traceId"),
                     "raw_request": body,
                     "http_request": request,
-                    "auth": auth_context
+                    "auth": auth_context,
+                    "chat_manager": self.chat_manager  # Provide ChatManager in context
                 }
                 
                 # Get handler and params
-                handler = self.handlers[method]
+                handler = agent_methods[method]
                 params = body["params"]
                 
                 # Check if streaming is requested for chat methods
@@ -275,7 +296,7 @@ class ARCServer:
                 response = {
                     "arc": "1.0",
                     "id": body["id"],
-                    "responseAgent": self.agent_id,
+                    "responseAgent": target_agent,
                     "targetAgent": body["requestAgent"],
                     "result": result,
                     "error": None
@@ -299,7 +320,7 @@ class ARCServer:
                 error_resp = {
                     "arc": "1.0",
                     "id": body["id"] if isinstance(body, dict) and "id" in body else str(uuid.uuid4()),
-                    "responseAgent": self.agent_id,
+                    "responseAgent": "arc-server",
                     "targetAgent": body["requestAgent"] if isinstance(body, dict) and "requestAgent" in body else "unknown",
                     "traceId": body.get("traceId") if isinstance(body, dict) else None,
                     "result": None,
@@ -317,7 +338,7 @@ class ARCServer:
                 error_resp = {
                     "arc": "1.0",
                     "id": "error",
-                    "responseAgent": self.agent_id,
+                    "responseAgent": "arc-server",
                     "targetAgent": "unknown",
                     "result": None,
                     "error": {
@@ -335,7 +356,7 @@ class ARCServer:
                 error_resp = {
                     "arc": "1.0",
                     "id": body["id"] if isinstance(body, dict) and "id" in body else "error",
-                    "responseAgent": self.agent_id,
+                    "responseAgent": "arc-server",
                     "targetAgent": body["requestAgent"] if isinstance(body, dict) and "requestAgent" in body else "unknown",
                     "traceId": body.get("traceId") if isinstance(body, dict) else None,
                     "result": None,
@@ -352,48 +373,93 @@ class ARCServer:
         @self.app.get("/health")
         async def health_check():
             """Health check endpoint"""
-            return {"status": "ok", "agent": self.agent_id}
+            return {"status": "ok", "server": self.server_id, "agents": len(self.agents)}
             
         @self.app.get("/agent-info")
         async def agent_info():
-            """Agent information endpoint"""
+            """Multi-agent server information endpoint"""
+            agents_info = {}
+            for agent_id, methods in self.agents.items():
+                agents_info[agent_id] = {
+                    "supportedMethods": list(methods.keys()),
+                    "status": "active"
+                }
+            
             return {
-                "agentId": self.agent_id,
-                "description": self.agent_description,
+                "server": self.server_id,
+                "description": self.server_description,
                 "status": "active",
                 "endpoints": {
                     "arc": "/arc"
                 },
-                "supportedMethods": self.supported_methods
+                "registeredAgents": agents_info,
+                "totalAgents": len(self.agents)
             }
     
-    def register_handler(self, method: str, handler: Callable):
+    def register_agent_handler(self, agent_id: str, method: str, handler: Callable):
         """
-        Register a method handler.
+        Register a method handler for a specific agent.
         
         Args:
-            method: ARC method name (e.g., "task.create")
+            agent_id: ID of the agent
+            method: ARC method name (e.g., "chat.start")
             handler: Async function that handles the method
                      Expected signature: async def handler(params: dict, context: dict) -> dict
         """
-        self.handlers[method] = handler
-        if method not in self.supported_methods:
-            self.supported_methods.append(method)
-        logger.info(f"Registered handler for method: {method}")
+        if agent_id not in self.agents:
+            self.agents[agent_id] = {}
+            self.supported_agents.append(agent_id)
+        
+        self.agents[agent_id][method] = handler
+        logger.info(f"Registered handler for agent {agent_id}, method {method}")
+            
+    def agent_handler(self, agent_id: str, method: str):
+        """
+        Decorator for registering agent method handlers.
+        
+        Args:
+            agent_id: ID of the agent that handles this method
+            method: ARC method name (e.g., "chat.start")
+            
+        Example:
+            @server.agent_handler("finance-agent", "chat.start")
+            async def handle_finance_chat_start(params, context):
+                return {"type": "chat", "chat": {...}}
+        """
+        def decorator(func: Callable):
+            self.register_agent_handler(agent_id, method, func)
+            return func
+        return decorator
+    
+    def register_agent(self, agent_id: str):
+        """
+        Register an agent (without methods).
+        
+        Args:
+            agent_id: ID of the agent to register
+        """
+        if agent_id not in self.agents:
+            self.agents[agent_id] = {}
+            self.supported_agents.append(agent_id)
+            logger.info(f"Registered agent: {agent_id}")
+    
+    # Backward compatibility methods
+    def register_handler(self, method: str, handler: Callable):
+        """
+        DEPRECATED: Register a method handler (backward compatibility).
+        Use agent_handler() for multi-agent support.
+        """
+        logger.warning("register_handler() is deprecated. Use agent_handler() for multi-agent support.")
+        # For backward compatibility, register under a default agent
+        default_agent = "default-agent"
+        self.register_agent_handler(default_agent, method, handler)
             
     def method_handler(self, method: str):
         """
-        Decorator for registering method handlers.
-        
-        Args:
-            method: ARC method name (e.g., "task.create")
-            
-        Example:
-            @server.method_handler("task.create")
-            async def handle_task_create(params, context):
-                # Implementation
-                return {"type": "task", "task": {...}}
+        DEPRECATED: Decorator for registering method handlers (backward compatibility).
+        Use agent_handler() for multi-agent support.
         """
+        logger.warning("method_handler() is deprecated. Use agent_handler() for multi-agent support.")
         def decorator(func: Callable):
             self.register_handler(method, func)
             return func
@@ -413,7 +479,7 @@ class ARCServer:
         """Get the FastAPI application instance"""
         return self.app
         
-    def use_jwt_validator(self, validator: Union[JWTValidator, MultiProviderJWTValidator]):
+    def use_jwt_validator(self, validator):
         """
         Configure JWT token validation for authentication.
         
@@ -453,10 +519,10 @@ class ARCServer:
         """
         import uvicorn
         
-        if not self.handlers:
-            logger.warning("No method handlers registered. Server will reject all method calls.")
+        if not self.agents:
+            logger.warning("No agents registered. Server will reject all method calls.")
             
-        logger.info(f"Starting ARC server for agent {self.agent_id} on {host}:{port}")
+        logger.info(f"Starting ARC server {self.server_id} on {host}:{port}")
         uvicorn.run(
             self.app,
             host=host,
@@ -466,15 +532,15 @@ class ARCServer:
         )
 
 
-def create_server(agent_id: str, **kwargs) -> ARCServer:
+def create_server(server_id: str = "arc-server", **kwargs) -> ARCServer:
     """
-    Create an ARC server with the given agent ID.
+    Create an ARC multi-agent server.
     
     Args:
-        agent_id: ID of the agent
+        server_id: ID of the server (for identification and logging)
         **kwargs: Additional arguments to pass to ARCServer constructor
         
     Returns:
-        Initialized ARCServer instance
+        Initialized ARCServer instance with multi-agent support
     """
-    return ARCServer(agent_id, **kwargs)
+    return ARCServer(server_id=server_id, **kwargs)

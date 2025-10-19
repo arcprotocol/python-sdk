@@ -18,7 +18,7 @@ def read_requirements():
 
 setup(
     name="arc-sdk",
-    version="1.1.0",
+    version="1.2.1",
     author="Moein Roghani",
     author_email="moein.roghani@proton.me",
     description="Python implementation of the Agent Remote Communication (ARC) Protocol",
@@ -60,8 +60,10 @@ setup(
     extras_require={
         "server": ["fastapi>=0.104.0", "uvicorn[standard]>=0.24.0"],
         "client": ["httpx>=0.25.0"],
+        "fastapi": ["fastapi>=0.104.0"],
+        "starlette": ["starlette>=0.27.0"],
         "validation": ["pydantic>=2.0.0", "jsonschema>=4.19.0"],
-        "all": ["fastapi>=0.104.0", "uvicorn[standard]>=0.24.0", "httpx>=0.25.0", "pydantic>=2.0.0", "jsonschema>=4.19.0"],
+        "all": ["fastapi>=0.104.0", "starlette>=0.27.0", "uvicorn[standard]>=0.24.0", "httpx>=0.25.0", "pydantic>=2.0.0", "jsonschema>=4.19.0"],
         "dev": ["pytest>=7.0.0", "pytest-asyncio>=0.21.0", "black>=23.0.0", "flake8>=6.0.0", "mypy>=1.5.0"],
     },
     entry_points={

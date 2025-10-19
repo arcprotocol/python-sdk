@@ -6,11 +6,14 @@ Provides utilities for sending streaming responses using the SSE protocol.
 
 import json
 import asyncio
+import logging
 from typing import Dict, Any, Optional, AsyncIterable, Union, Callable, TypeVar, Generator
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 from starlette.types import Send
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
 
@@ -64,25 +67,22 @@ class SSEResponse(StreamingResponse):
         try:
             async for chunk in self.content_iterator:
                 # Convert chunk to SSE format
-                yield self._format_sse_event(chunk)
+                formatted_event = self._format_sse_event(chunk)
+                yield formatted_event.encode('utf-8')
                 
-                # Ensure chunks are sent immediately
+                # Yield control to allow immediate sending (no artificial delay)
                 await asyncio.sleep(0)
                 
         except Exception as e:
             # If there's an error, send an error event
+            logger.error(f"SSE streaming error: {str(e)}")
             error_event = {
                 "event": "error",
-                "data": {"message": str(e)}
+                "data": {"message": str(e), "code": -43005}
             }
-            yield self._format_sse_event(error_event)
+            yield self._format_sse_event(error_event).encode('utf-8')
             
-        # Always send a done event at the end
-        done_event = {
-            "event": "done",
-            "data": {"done": True}
-        }
-        yield self._format_sse_event(done_event)
+        # Note: Don't send automatic done event here - let the generator handle it
         
     def _format_sse_event(self, chunk: Dict[str, Any]) -> str:
         """
@@ -100,13 +100,13 @@ class SSEResponse(StreamingResponse):
         # Format as SSE
         formatted = f"event: {event_type}\n"
         
-        # Convert data to JSON string
+        # Convert data to JSON string (compact, single-line)
         if isinstance(data, (dict, list)):
-            data_str = json.dumps(data)
+            data_str = json.dumps(data, separators=(',', ':'))
         else:
             data_str = str(data)
-            
-        # Split data into multiple data: lines if needed
+        
+        # Single data line (our JSON is always single-line)
         formatted += f"data: {data_str}\n\n"
         
         return formatted
@@ -188,13 +188,13 @@ def stream_event(event_type: str, data: Dict[str, Any]) -> str:
     # Format as SSE
     formatted = f"event: {event_type}\n"
     
-    # Convert data to JSON string
+    # Convert data to JSON string (compact, single-line)
     if isinstance(data, (dict, list)):
-        data_str = json.dumps(data)
+        data_str = json.dumps(data, separators=(',', ':'))
     else:
         data_str = str(data)
-        
-    # Add data line
+    
+    # Single data line (our JSON is always single-line)
     formatted += f"data: {data_str}\n\n"
     
     return formatted

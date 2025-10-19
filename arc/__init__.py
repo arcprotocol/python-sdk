@@ -9,7 +9,7 @@ Homepage: https://arc-protocol.org
 Documentation: https://docs.arc-protocol.org
 """
 
-__version__ = "1.0.0"
+__version__ = "1.2.1"
 __author__ = "Moein Roghani"
 __email__ = "moein.roghani@proton.me"
 __license__ = "Apache-2.0"
@@ -103,6 +103,19 @@ from .server import (
     validate_params, require_scopes, task_method,
     chat_method, error_handler, trace_method
 )
+
+# Framework integrations (optional imports)
+try:
+    from . import fastapi
+    _HAS_FASTAPI = True
+except ImportError:
+    _HAS_FASTAPI = False
+
+try:
+    from . import starlette
+    _HAS_STARLETTE = True
+except ImportError:
+    _HAS_STARLETTE = False
 
 # Version information
 def get_version():

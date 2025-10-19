@@ -7,34 +7,63 @@
 [![GitHub stars](https://img.shields.io/github/stars/arcprotocol/python-sdk.svg?style=social&label=Star)](https://github.com/arcprotocol/python-sdk)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-## 🚀 **World's First Multi-Agent RPC Protocol**
+## 🚀 **Advanced Agent-to-Agent Communication Protocol**
 
-> **ARC (Agent Remote Communication)** is the first RPC protocol that solves multi-agent deployment complexity with built-in agent routing, load balancing, and workflow tracing. Deploy hundreds of different agent types on a single endpoint with zero infrastructure overhead.
+> **ARC (Agent Remote Communication)** is a next-generation agent-to-agent protocol that solves multi-agent deployment complexity with built-in agent routing, workflow tracing, and SSE streaming. Deploy hundreds of different agent types on a single endpoint with zero infrastructure overhead.
 
-### **🎯 Revolutionary Multi-Agent Features:**
+### **🏗️ Flexible Server Architecture**
+**Single package, multiple deployment options** - choose the approach that fits your infrastructure:
+- **🔧 Custom ASGI Server** - Standalone server with built-in middleware (zero dependencies)
+- **⚡ FastAPI Integration** - Router for existing FastAPI applications (optional: `pip install arc-sdk[fastapi]`)
+- **🪶 Starlette Integration** - Lightweight ASGI toolkit integration (optional: `pip install arc-sdk[starlette]`)
+
+### **🎯 Protocol Advantages Over A2A & ACP:**
 - **🏗️ Single Endpoint, Multiple Agents** - Deploy 10s or 100s of agents behind `https://company.com/arc`
 - **⚖️ Built-in Load Balancing** - Route to `finance-agent-01`, `finance-agent-02`, `finance-agent-03` automatically  
 - **🔄 Cross-Agent Workflows** - Agent A → Agent B → Agent C with full traceability via `traceId`
+- **🎯 Agent-First Design** - Purpose-built for agent communication with native routing
 - **📡 Unified Agent Management** - No service discovery, no API gateways, no orchestration engines required
 - **🔍 End-to-End Tracing** - Track complex workflows across multiple agent interactions
 - **⚡ Zero Infrastructure Overhead** - Single deployment handles all agent types
+- **🔧 Flexible Server Architecture** - Custom ASGI, FastAPI, or Starlette integration
 
-### **🆚 Why ARC vs Others:**
+### **🆚 ARC vs Other Agent-to-Agent Protocols:**
 
-| Feature | ARC | JSON-RPC 2.0 | gRPC | REST |
-|---------|-----|---------------|------|------|
-| **Agent Routing** | ✅ Built-in | ❌ Manual | ❌ Manual | ❌ Manual |
-| **Workflow Tracing** | ✅ Native | ❌ Custom | ⚠️ External | ❌ Custom |
-| **Multi-Agent Ready** | ✅ First-class | ❌ DIY | ❌ DIY | ❌ DIY |
-| **Load Balancing** | ✅ Protocol-level | ❌ External | ❌ External | ❌ External |
-| **Learning Curve** | ✅ Simple | ✅ Simple | ❌ Complex | ✅ Simple |
+| Feature | **ARC Protocol** | **A2A (Google)** | **ACP (IBM/Linux Foundation)** |
+|---------|------------------|-------------------|--------------------------------|
+| **Streaming Model** | ✅ SSE (Server-Sent Events) | ✅ SSE downstream | ⚠️ Chunked HTTP, not duplex |
+| **Transport** | ✅ HTTP/1.1 + SSE | ✅ HTTP/1.1 + SSE | ❌ HTTP/1.x only |
+| **Message Format** | ✅ JSON with structured parts | ✅ JSON with parts | ✅ JSON with MIME parts |
+| **Task Lifecycle** | ✅ Native task methods + webhooks | ⚠️ SSE + webhook registration | ⚠️ Client polling/resume |
+| **Multi-Agent Routing** | ✅ Single endpoint, built-in | ✅ Agent Card discovery | ⚠️ Manifest-based, looser |
+| **Agent Discovery** | ✅ Built-in agent routing | ✅ Agent Card system | ⚠️ Manifest-based discovery |
+| **Error Handling** | ✅ Rich error taxonomy (500+ codes) | ⚠️ JSON-RPC error codes | ⚠️ HTTP status codes |
+| **Workflow Tracing** | ✅ Native `traceId` support | ⚠️ Custom implementation | ⚠️ Custom implementation |
+| **Learning Curve** | ✅ Simple RPC-style | ✅ Familiar JSON-RPC | ✅ REST-like HTTP |
+| **Governance** | ✅ Open Protocol | ⚠️ Google-led | ✅ Linux Foundation |
 
 ## 📦 **Quick Start**
 
-### Installation
+### Installation Options
 
+**Core Package (Custom ASGI Server):**
 ```bash
 pip install arc-sdk
+```
+
+**With FastAPI Integration:**
+```bash
+pip install arc-sdk[fastapi]
+```
+
+**With Starlette Integration:**
+```bash
+pip install arc-sdk[starlette]
+```
+
+**All Framework Integrations:**
+```bash
+pip install arc-sdk[all]
 ```
 
 ### 🔥 **30-Second Multi-Agent Demo**
@@ -184,6 +213,103 @@ if needs_escalation:
     )
 ```
 
+## 🏗️ **Server Deployment Options**
+
+The ARC SDK provides **three flexible deployment approaches** to fit your infrastructure needs:
+
+### **1. Custom ASGI Server (Built-in)**
+Our **custom ASGI implementation** provides a complete, standalone server with built-in middleware:
+
+```python
+from arc.server import create_server
+
+# Create multi-agent server with built-in features
+server = create_server(
+    server_id="my-arc-server",
+    enable_chat_manager=True,
+    enable_cors=True,
+    enable_auth=True
+)
+
+@server.agent_handler("finance-agent", "chat.start")
+async def handle_finance_chat(params, context):
+    return {"type": "chat", "chat": {...}}
+
+# Run standalone server
+server.run(host="0.0.0.0", port=8000)
+```
+
+### **2. FastAPI Integration**
+Integrate ARC into **existing FastAPI applications** using our router:
+
+```python
+from fastapi import FastAPI
+from arc.fastapi import ARCRouter
+
+# Your existing FastAPI app
+app = FastAPI()
+app.add_middleware(CORSMiddleware, ...)  # Your middleware
+app.add_middleware(AuthMiddleware, ...)  # Your auth
+
+# Add ARC router
+arc_router = ARCRouter(enable_chat_manager=True, chat_manager_agent_id="server")
+
+@arc_router.agent_handler("finance-agent", "chat.start")
+async def handle_finance_chat(params, context):
+    return {"type": "chat", "chat": {...}}
+
+# Mount ARC router into your app
+app.include_router(arc_router, prefix="/arc")
+```
+
+### **3. Starlette Integration**
+For **lightweight ASGI applications** using Starlette toolkit:
+
+```python
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from arc.starlette import ARCRouter
+
+# Lightweight Starlette app
+app = Starlette(middleware=[...])  # Your middleware
+
+# Add ARC router
+arc_router = ARCRouter(enable_chat_manager=True, chat_manager_agent_id="server")
+
+@arc_router.agent_handler("finance-agent", "chat.start")
+async def handle_finance_chat(params, context):
+    return {"type": "chat", "chat": {...}}
+
+# Mount ARC router
+app.mount("/arc", arc_router)
+```
+
+### **🔧 Framework Architecture**
+
+**ASGI Stack Hierarchy:**
+```
+┌─────────────────┐
+│    FastAPI      │ ← Full web framework with automatic docs, validation
+│   (Full Stack)  │
+├─────────────────┤
+│   Starlette     │ ← Lightweight ASGI toolkit with routing, middleware
+│  (Lightweight)  │
+├─────────────────┤
+│  ASGI Spec      │ ← Asynchronous Server Gateway Interface standard
+│ (Foundation)    │
+└─────────────────┘
+
+ARC SDK Options:
+├── Custom ASGI    ← Our own ASGI implementation (standalone)
+├── FastAPI        ← Router for existing FastAPI apps  
+└── Starlette      ← Router for lightweight ASGI apps
+```
+
+**Choose Your Deployment:**
+- **Custom ASGI**: Standalone server, zero dependencies, built-in features
+- **FastAPI**: Integrate into existing FastAPI apps, full framework features
+- **Starlette**: Lightweight integration, minimal overhead, ASGI toolkit
+
 ## 🏢 **Production Deployment**
 
 ### **Docker Deployment**
@@ -241,8 +367,20 @@ Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 **🚀 Ready to revolutionize your multi-agent architecture?**
 
+**Choose your deployment approach:**
+
 ```bash
+# Standalone server (custom ASGI)
 pip install arc-sdk
+
+# FastAPI integration  
+pip install arc-sdk[fastapi]
+
+# Starlette integration
+pip install arc-sdk[starlette]
+
+# All options
+pip install arc-sdk[all]
 ```
 
 **Join the ARC Protocol community:** [https://arc-protocol.org](https://arc-protocol.org)

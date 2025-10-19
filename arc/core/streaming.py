@@ -23,48 +23,7 @@ from ..server.sse import stream_event
 logger = logging.getLogger(__name__)
 
 
-# --- New Core Streaming Utilities ---
-
-async def stream_content_word_by_word(text: str, delay: float = 0.1) -> AsyncGenerator[str, None]:
-    """
-    Generate a stream of text content word by word.
-    
-    This utility breaks a text string into words and yields one word at a time,
-    with configurable delay between words to simulate natural typing.
-    
-    Args:
-        text: Full text content to stream
-        delay: Delay between words in seconds (default: 0.1)
-        
-    Yields:
-        Incrementally built text string, one word at a time
-    """
-    words = text.split()
-    current_text = ""
-    
-    for i, word in enumerate(words):
-        # Add space before words except the first one
-        if i > 0:
-            current_text += " "
-        current_text += word
-        yield current_text
-        await asyncio.sleep(delay)
-
-
-async def stream_content_chunk_by_chunk(chunks: List[str], delay: float = 0.1) -> AsyncGenerator[str, None]:
-    """
-    Generate a stream of pre-defined content chunks.
-    
-    Args:
-        chunks: List of content chunks to stream in sequence
-        delay: Delay between chunks in seconds (default: 0.1)
-        
-    Yields:
-        Each chunk in sequence
-    """
-    for chunk in chunks:
-        yield chunk
-        await asyncio.sleep(delay)
+# --- Core SSE Protocol Utilities ---
 
 
 async def generate_sse_events(
@@ -90,17 +49,7 @@ async def generate_sse_events(
     Yields:
         Properly formatted SSE event strings ready for streaming
     """
-    # Initial event with empty content
-    initial_data = {
-        "chatId": chat_id,
-        "message": {
-            "role": role,
-            "parts": []
-        }
-    }
-    yield stream_event("stream", initial_data)
-    
-    # Stream each content update
+    # Stream each content update - no initial empty event needed
     async for content in content_generator:
         chat_data = {
             "chatId": chat_id,
@@ -116,101 +65,65 @@ async def generate_sse_events(
         yield stream_event("stream", chat_data)
     
     # Final done event
-    done_data = {"chatId": chat_id}
+    done_data = {"chatId": chat_id, "status": "ACTIVE", "done": True}
     if request_id:
         done_data["requestId"] = request_id
     yield stream_event("done", done_data)
 
 
-class ContentStreamGenerator:
-    """
-    Utility class for generating content streams with different strategies.
-    
-    This class provides methods for creating content generators using
-    various streaming strategies (word by word, character by character, etc.)
-    suitable for use with SSE streaming responses.
-    """
-    
-    @staticmethod
-    async def word_by_word(
-        text: str, 
-        delay: float = 0.1
-    ) -> AsyncGenerator[str, None]:
-        """Stream text content word by word"""
-        async for content in stream_content_word_by_word(text, delay):
-            yield content
-    
-    @staticmethod
-    async def char_by_char(
-        text: str, 
-        delay: float = 0.05
-    ) -> AsyncGenerator[str, None]:
-        """Stream text content character by character"""
-        current = ""
-        for char in text:
-            current += char
-            yield current
-            await asyncio.sleep(delay)
-    
-    @staticmethod
-    async def chunk_by_chunk(
-        chunks: List[str],
-        delay: float = 0.1
-    ) -> AsyncGenerator[str, None]:
-        """Stream pre-defined chunks in sequence"""
-        async for content in stream_content_chunk_by_chunk(chunks, delay):
-            yield content
-            
-    @staticmethod
-    async def from_parts(
-        parts: List[Dict[str, Any]],
-        delay: float = 0.1
-    ) -> AsyncGenerator[str, None]:
-        """
-        Stream text content from message parts.
-        
-        Extracts text content from TextPart message parts and streams it.
-        """
-        full_text = ""
-        for part in parts:
-            if part.get("type") == "TextPart" and "content" in part:
-                full_text += part["content"]
-        
-        async for content in stream_content_word_by_word(full_text, delay):
-            yield content
 
 
 async def create_chat_stream_generator(
     chat_id: str,
-    message: Dict[str, Any],
+    content_generator: AsyncGenerator[str, None],
     request_id: Optional[str] = None,
-    delay: float = 0.1
+    role: str = "agent"
 ) -> AsyncGenerator[str, None]:
     """
     Create a generator for streaming a chat message using the ARC protocol format.
     
-    This is a high-level utility that takes a chat message and returns a generator
-    that yields properly formatted SSE event strings following the ARC protocol.
+    This utility takes a content generator from the agent and formats it as
+    proper SSE events following the ARC protocol streaming specification.
     
     Args:
         chat_id: Chat identifier
-        message: Full message object with role and parts
+        content_generator: Agent's content generator (true streaming source)
         request_id: Request ID for the done event
-        delay: Delay between content updates
+        role: Message role (default: "agent")
         
     Returns:
         Async generator yielding SSE event strings
+        
+    Raises:
+        ValueError: If chat_id is empty or invalid
     """
-    # Extract parts from the message
-    parts = message.get("parts", [])
-    role = message.get("role", "agent")
+    if not chat_id or not isinstance(chat_id, str):
+        raise ValueError("chat_id must be a non-empty string")
     
-    # Create content generator based on parts
-    content_gen = ContentStreamGenerator.from_parts(parts, delay)
+    if not content_generator:
+        raise ValueError("content_generator is required for streaming")
     
-    # Create SSE event generator from content
-    async for event in generate_sse_events(chat_id, content_gen, role, request_id):
-        yield event
+    try:
+        # Create SSE event generator from the agent's content stream
+        async for event in generate_sse_events(chat_id, content_generator, role, request_id):
+            yield event
+            
+    except Exception as e:
+        # Send error event and close gracefully
+        error_data = {
+            "chatId": chat_id,
+            "error": {
+                "code": -43005,  # ARC chat error code
+                "message": f"Stream error: {str(e)}"
+            }
+        }
+        yield stream_event("error", error_data)
+        
+        # Send done event to close stream
+        done_data = {"chatId": chat_id, "status": "ERROR", "done": True}
+        if request_id:
+            done_data["requestId"] = request_id
+        yield stream_event("done", done_data)
 
 
 # --- Client-side Streaming Parser ---
