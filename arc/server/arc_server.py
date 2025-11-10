@@ -3,11 +3,12 @@ ARC Server Implementation
 
 FastAPI-based server for handling ARC protocol requests.
 Integrates with ARC request processing and provides authentication,
-validation, and error handling.
+validation, and error handling with optional quantum-safe TLS.
 """
 
 import logging
 import json
+import ssl
 import uuid
 from typing import Dict, Callable, Optional, Any, List, Union
 from fastapi import FastAPI, Request, HTTPException, Depends
@@ -28,6 +29,12 @@ except ImportError:
     # JWT validators are optional dependencies
     JWTValidator = None
     MultiProviderJWTValidator = None
+
+try:
+    from ..crypto import create_quantum_safe_context, HybridTLSConfig, verify_kyber_support
+    QUANTUM_SAFE_AVAILABLE = True
+except ImportError:
+    QUANTUM_SAFE_AVAILABLE = False
 
 
 logger = logging.getLogger(__name__)
@@ -506,30 +513,176 @@ class ARCServer:
         host: str = "0.0.0.0", 
         port: int = 8000, 
         reload: bool = False,
+        ssl_context: Optional[ssl.SSLContext] = None,
+        use_quantum_safe: bool = True,
+        hybrid_tls_config: Optional['HybridTLSConfig'] = None,
+        ssl_keyfile: Optional[str] = None,
+        ssl_certfile: Optional[str] = None,
+        ssl_ca_certs: Optional[str] = None,
         **kwargs
     ):
         """
-        Run the ARC server using Uvicorn.
+        Run the ARC server using Uvicorn with quantum-safe hybrid TLS by default.
         
         Args:
             host: Host to bind to
             port: Port to listen on
             reload: Enable auto-reload for development
+            ssl_context: Custom SSL context for TLS (overrides all other SSL settings)
+            use_quantum_safe: Use quantum-safe hybrid TLS (default: True, falls back to standard TLS if unavailable)
+            hybrid_tls_config: Configuration for hybrid TLS (optional)
+            ssl_keyfile: Path to SSL private key file
+            ssl_certfile: Path to SSL certificate file
+            ssl_ca_certs: Path to CA certificates file (for mutual TLS)
             **kwargs: Additional arguments passed to uvicorn.run
+            
+        Example:
+            >>> # Quantum-safe hybrid TLS (default)
+            >>> server.run(
+            ...     host="0.0.0.0",
+            ...     port=443,
+            ...     ssl_keyfile="/path/to/key.pem",
+            ...     ssl_certfile="/path/to/cert.pem"
+            ... )
+            
+            >>> # Disable quantum-safe TLS (use standard TLS)
+            >>> server.run(
+            ...     host="0.0.0.0",
+            ...     port=443,
+            ...     use_quantum_safe=False,
+            ...     ssl_keyfile="/path/to/key.pem",
+            ...     ssl_certfile="/path/to/cert.pem"
+            ... )
         """
         import uvicorn
         
         if not self.agents:
             logger.warning("No agents registered. Server will reject all method calls.")
             
-        logger.info(f"Starting ARC server {self.server_id} on {host}:{port}")
-        uvicorn.run(
-            self.app,
-            host=host,
-            port=port,
-            reload=reload,
-            **kwargs
+        # Setup SSL configuration
+        ssl_config = self._setup_ssl_for_server(
+            ssl_context,
+            use_quantum_safe,
+            hybrid_tls_config,
+            ssl_keyfile,
+            ssl_certfile,
+            ssl_ca_certs
         )
+        
+        # Log server startup
+        protocol = "https" if ssl_config else "http"
+        logger.info(f"Starting ARC server {self.server_id} on {protocol}://{host}:{port}")
+        
+        if use_quantum_safe and QUANTUM_SAFE_AVAILABLE:
+            logger.info("Using post-quantum hybrid TLS (X25519 + Kyber-768)")
+        elif use_quantum_safe and not QUANTUM_SAFE_AVAILABLE:
+            logger.warning(
+                "Post-quantum cryptography (PQC) not available. "
+                "Install with: pip install arc-sdk[pqc] "
+                "Using standard TLS."
+            )
+        
+        # Prepare uvicorn arguments
+        uvicorn_args = {
+            "host": host,
+            "port": port,
+            "reload": reload,
+        }
+        
+        # Add SSL configuration if available
+        if ssl_config:
+            if isinstance(ssl_config, ssl.SSLContext):
+                uvicorn_args["ssl_context"] = ssl_config
+            else:
+                # Standard SSL with key/cert files
+                if ssl_keyfile:
+                    uvicorn_args["ssl_keyfile"] = ssl_keyfile
+                if ssl_certfile:
+                    uvicorn_args["ssl_certfile"] = ssl_certfile
+                if ssl_ca_certs:
+                    uvicorn_args["ssl_ca_certs"] = ssl_ca_certs
+        
+        # Merge with additional kwargs
+        uvicorn_args.update(kwargs)
+        
+        uvicorn.run(self.app, **uvicorn_args)
+    
+    def _setup_ssl_for_server(
+        self,
+        ssl_context: Optional[ssl.SSLContext],
+        use_quantum_safe: bool,
+        hybrid_tls_config: Optional['HybridTLSConfig'],
+        ssl_keyfile: Optional[str],
+        ssl_certfile: Optional[str],
+        ssl_ca_certs: Optional[str]
+    ) -> Optional[Union[ssl.SSLContext, Dict[str, str]]]:
+        """
+        Setup SSL configuration for the server.
+        
+        Priority:
+        1. Custom ssl_context if provided
+        2. Quantum-safe hybrid TLS (default if SSL files provided)
+        3. Standard SSL with keyfile/certfile
+        4. None (no SSL)
+        """
+        # If custom SSL context provided, use it
+        if ssl_context is not None:
+            return ssl_context
+        
+        # Try to use post-quantum cryptography (PQC) hybrid TLS (default if SSL files provided)
+        if use_quantum_safe and ssl_keyfile and ssl_certfile:
+            if not QUANTUM_SAFE_AVAILABLE:
+                logger.warning(
+                    "Post-quantum cryptography (PQC) not available. "
+                    "Install with: pip install arc-sdk[pqc] "
+                    "Using standard TLS."
+                )
+                # Fall through to standard SSL
+            else:
+                try:
+                    # Create PQC context for server
+                    from ..crypto import create_hybrid_ssl_context
+                    
+                    if hybrid_tls_config is None:
+                        hybrid_tls_config = HybridTLSConfig()
+                    
+                    context = create_hybrid_ssl_context(
+                        config=hybrid_tls_config,
+                        purpose=ssl.Purpose.CLIENT_AUTH  # Server purpose
+                    )
+                    
+                    # Load server certificate and key
+                    context.load_cert_chain(
+                        certfile=ssl_certfile,
+                        keyfile=ssl_keyfile
+                    )
+                    
+                    # Load CA certificates for client verification (mutual TLS)
+                    if ssl_ca_certs:
+                        context.load_verify_locations(cafile=ssl_ca_certs)
+                        context.verify_mode = ssl.CERT_REQUIRED
+                    
+                    logger.info("Server configured with post-quantum hybrid TLS")
+                    return context
+                    
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to create PQC SSL context: {e}. "
+                        "Falling back to standard TLS."
+                    )
+                    # Fall through to standard SSL
+        
+        # Standard SSL with keyfile/certfile
+        if ssl_keyfile and ssl_certfile:
+            logger.info("Server configured with standard TLS")
+            return {
+                "ssl_keyfile": ssl_keyfile,
+                "ssl_certfile": ssl_certfile,
+                "ssl_ca_certs": ssl_ca_certs
+            }
+        
+        # No SSL (HTTP only)
+        return None
 
 
 def create_server(server_id: str = "arc-server", **kwargs) -> ARCServer:

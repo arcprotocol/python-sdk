@@ -9,7 +9,7 @@ Homepage: https://arc-protocol.org
 Documentation: https://docs.arc-protocol.org
 """
 
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 __author__ = "Moein Roghani"
 __email__ = "moein.roghani@proton.me"
 __license__ = "Apache-2.0"

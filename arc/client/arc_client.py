@@ -7,6 +7,7 @@ Main client class for making requests to ARC-compatible servers.
 import asyncio
 import json
 import logging
+import ssl
 import uuid
 from typing import Any, Dict, List, Optional, Union, TypeVar, Generic, cast, AsyncIterator
 
@@ -23,6 +24,12 @@ from ..exceptions import (
     ConnectionError, TimeoutError
 )
 
+try:
+    from ..crypto import create_quantum_safe_context, HybridTLSConfig
+    QUANTUM_SAFE_AVAILABLE = True
+except ImportError:
+    QUANTUM_SAFE_AVAILABLE = False
+
 # Type definitions
 T = TypeVar('T')
 ResponseType = Dict[str, Any]
@@ -37,7 +44,7 @@ class ARCClient:
     ARC Protocol client for agent communication.
     
     This client provides methods for interacting with ARC-compatible agents
-    using the Agent Remote Communication protocol.
+    using the Agent Remote Communication protocol with quantum-safe hybrid TLS by default.
     
     Args:
         endpoint: The ARC endpoint URL
@@ -45,10 +52,21 @@ class ARCClient:
         request_agent: ID of the agent making requests (default: auto-generated)
         timeout: Default request timeout in seconds (default: 60)
         verify_ssl: Whether to verify SSL certificates (default: True)
+        ssl_context: Custom SSL context (overrides all other SSL settings if provided)
+        use_quantum_safe: Use quantum-safe hybrid TLS (default: True, falls back to standard TLS if unavailable)
+        hybrid_tls_config: Configuration for hybrid TLS (optional)
         
     Example:
+        >>> # Quantum-safe hybrid TLS (default)
         >>> client = ARCClient("https://api.company.com/arc", token="...")
         >>> task = await client.task.create(target_agent="doc-analyzer", ...)
+        
+        >>> # Disable quantum-safe TLS (use standard TLS)
+        >>> client = ARCClient(
+        ...     "https://api.company.com/arc",
+        ...     token="...",
+        ...     use_quantum_safe=False
+        ... )
     """
     
     def __init__(
@@ -58,6 +76,9 @@ class ARCClient:
         request_agent: Optional[str] = None,
         timeout: float = 60.0,
         verify_ssl: bool = True,
+        ssl_context: Optional[ssl.SSLContext] = None,
+        use_quantum_safe: bool = True,
+        hybrid_tls_config: Optional['HybridTLSConfig'] = None,
     ):
         self.endpoint = endpoint.rstrip('/')
         self.token = token
@@ -65,16 +86,72 @@ class ARCClient:
         self.timeout = timeout
         self.verify_ssl = verify_ssl
         
+        # Determine SSL configuration
+        ssl_config = self._setup_ssl_context(
+            ssl_context, 
+            use_quantum_safe, 
+            hybrid_tls_config, 
+            verify_ssl
+        )
+        
         # Initialize HTTP client
         self.http_client = httpx.AsyncClient(
             timeout=timeout,
-            verify=verify_ssl,
+            verify=ssl_config,
             follow_redirects=True
         )
         
         # Initialize method handlers
         self.task = TaskMethods(self)
         self.chat = ChatMethods(self)
+    
+    def _setup_ssl_context(
+        self,
+        ssl_context: Optional[ssl.SSLContext],
+        use_quantum_safe: bool,
+        hybrid_tls_config: Optional['HybridTLSConfig'],
+        verify_ssl: bool
+    ) -> Union[bool, ssl.SSLContext]:
+        """
+        Setup SSL context for the client.
+        
+        Priority:
+        1. Custom ssl_context if provided
+        2. Quantum-safe hybrid TLS (default)
+        3. Standard TLS (if quantum-safe disabled or unavailable)
+        """
+        # If custom SSL context provided, use it
+        if ssl_context is not None:
+            return ssl_context
+        
+        # Try to use post-quantum cryptography (PQC) hybrid TLS (default behavior)
+        if use_quantum_safe:
+            if not QUANTUM_SAFE_AVAILABLE:
+                logger.warning(
+                    "Post-quantum cryptography (PQC) not available. "
+                    "Install with: pip install arc-sdk[pqc] "
+                    "Falling back to standard TLS."
+                )
+                return verify_ssl
+            
+            try:
+                logger.info("Using post-quantum hybrid TLS (X25519 + Kyber-768)")
+                return create_quantum_safe_context(
+                    verify_ssl=verify_ssl,
+                    ca_cert_path=hybrid_tls_config.ca_cert_path if hybrid_tls_config else None,
+                    client_cert_path=hybrid_tls_config.client_cert_path if hybrid_tls_config else None,
+                    client_key_path=hybrid_tls_config.client_key_path if hybrid_tls_config else None
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to create PQC SSL context: {e}. "
+                    "Falling back to standard TLS."
+                )
+                return verify_ssl
+        
+        # User explicitly disabled PQC
+        logger.info("Using standard TLS (post-quantum cryptography disabled)")
+        return verify_ssl
         
     async def close(self):
         """Close the HTTP client and release resources."""
