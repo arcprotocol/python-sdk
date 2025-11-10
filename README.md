@@ -11,9 +11,8 @@
 
 **ARC (Agent Remote Communication)** is an agent-to-agent protocol with built-in agent routing, workflow tracing, and SSE streaming. Deploy multiple agent types on a single endpoint.
 
-### Quantum-Resistant Security
-
-ARC SDK implements end-to-end encryption using hybrid TLS (X25519 + Kyber-768), combining classical cryptography with post-quantum algorithms (FIPS 203 ML-KEM). Protects against quantum computing attacks.
+> [!IMPORTANT]
+> **Quantum-Resistant Security**: ARC SDK implements end-to-end encryption using hybrid TLS (X25519 + Kyber-768), combining classical cryptography with post-quantum algorithms (FIPS 203 ML-KEM). Protects against quantum computing attacks.
 
 ### Server Architecture
 
@@ -57,7 +56,9 @@ pip install arc-sdk
 ```bash
 pip install arc-sdk[pqc]
 ```
-Adds quantum-resistant hybrid TLS (X25519 + Kyber-768). See [PQC Documentation](README_QUANTUM_SAFE.md).
+
+> [!NOTE]
+> Adds quantum-resistant hybrid TLS (X25519 + Kyber-768). See [PQC Documentation](README_QUANTUM_SAFE.md).
 
 ### With FastAPI Integration
 ```bash

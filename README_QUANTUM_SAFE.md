@@ -2,6 +2,9 @@
 
 The ARC Python SDK includes optional post-quantum cryptography support using hybrid TLS with Kyber.
 
+> [!IMPORTANT]
+> **Installation**: `pip install arc-sdk[pqc]` builds quantum-resistant cryptography libraries automatically.
+
 ## Installation
 
 ```bash
@@ -39,7 +42,8 @@ Or download manually:
 - Ninja: https://github.com/ninja-build/ninja/releases
 - Visual Studio Build Tools: https://visualstudio.microsoft.com/downloads/
 
-**Note**: These are standard cross-platform build tools used by many projects.
+> [!NOTE]
+> These are standard cross-platform build tools used by many projects.
 
 ## Usage
 
@@ -53,14 +57,13 @@ client = Client(
     endpoint="https://api.example.com/arc",
     token="your-token"
 )
-
-# To disable PQC (if installed but you don't want to use it)
-client = Client(
-    endpoint="https://api.example.com/arc",
-    token="your-token",
-    use_quantum_safe=False
-)
 ```
+
+> [!TIP]
+> To disable PQC (if installed but you don't want to use it), set `use_quantum_safe=False`:
+> ```python
+> client = Client(endpoint="...", token="...", use_quantum_safe=False)
+> ```
 
 ### Server
 
@@ -76,16 +79,10 @@ server.run(
     ssl_keyfile="/path/to/server.key",
     ssl_certfile="/path/to/server.crt"
 )
-
-# To disable PQC (if installed but you don't want to use it)
-server.run(
-    host="0.0.0.0",
-    port=443,
-    ssl_keyfile="/path/to/server.key",
-    ssl_certfile="/path/to/server.crt",
-    use_quantum_safe=False
-)
 ```
+
+> [!TIP]
+> To disable PQC on the server, set `use_quantum_safe=False` in `server.run()`.
 
 ## What is Hybrid TLS?
 
@@ -125,23 +122,23 @@ Expected output:
 
 ## How It Works
 
-**Requirements**: Both client and server must install `arc-sdk[pqc]` for post-quantum cryptography.
+> [!NOTE]
+> **Requirements**: Both client and server must install `arc-sdk[pqc]` for post-quantum cryptography.
 
 **TLS Handshake**:
 - Both sides have PQC → Negotiates `x25519_kyber768` hybrid key exchange
 - One side missing PQC → OpenSSL falls back to classical X25519
 
-**Process**:
-1. Install: `pip install arc-sdk[pqc]` builds cryptography libraries
-2. Import: Libraries load automatically
-3. Connect: Hybrid TLS negotiated during handshake
+> [!TIP]
+> **Process**: Install → Import → Connect. Libraries load automatically, hybrid TLS is negotiated during handshake.
 
 ## References
 
-**Official NIST Documentation**:
-- [FIPS 203: Module-Lattice-Based Key-Encapsulation Mechanism Standard](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf)
-- [NIST Post-Quantum Cryptography Project](https://csrc.nist.gov/projects/post-quantum-cryptography)
-- [NIST IR 8413: Status Report on the Third Round of the NIST PQC Standardization Process](https://nvlpubs.nist.gov/nistpubs/ir/2022/NIST.IR.8413.pdf)
+> [!NOTE]
+> **Official NIST Documentation**:
+> - [FIPS 203: Module-Lattice-Based Key-Encapsulation Mechanism Standard](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf)
+> - [NIST Post-Quantum Cryptography Project](https://csrc.nist.gov/projects/post-quantum-cryptography)
+> - [NIST IR 8413: Status Report on the Third Round of the NIST PQC Standardization Process](https://nvlpubs.nist.gov/nistpubs/ir/2022/NIST.IR.8413.pdf)
 
 **Implementation**:
 - [Open Quantum Safe (OQS) Project](https://openquantumsafe.org/)
