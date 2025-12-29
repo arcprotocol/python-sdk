@@ -9,14 +9,23 @@ Homepage: https://arc-protocol.org
 Documentation: https://docs.arc-protocol.org
 """
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 __author__ = "Moein Roghani"
 __email__ = "moein.roghani@proton.me"
 __license__ = "Apache-2.0"
 
 # Clean, simple API - the main classes developers use
 from .client.arc_client import ARCClient as Client
+from .client.thread_manager import ThreadManager
 from .server.arc_server import ARCServer as Server
+
+# Storage backends for persistent chat sessions
+from .server.storage import (
+    ChatStorage,
+    RedisChatStorage,
+    PostgreSQLChatStorage,
+    MongoChatStorage
+)
 
 # Core exceptions
 from .exceptions import (
@@ -156,9 +165,16 @@ __all__ = [
     # Main API - what most developers need
     "Client",           # arc.Client (clean name)
     "Server",           # arc.Server (clean name)
+    "ThreadManager",    # arc.ThreadManager (client-side thread mapping)
     "create_client",    # Convenience function
     "create_server_app", # Convenience function
     "get_version",      # Version info
+    
+    # Storage backends for ChatManager
+    "ChatStorage",      # Abstract base class
+    "RedisChatStorage", # Redis implementation
+    "PostgreSQLChatStorage", # PostgreSQL implementation
+    "MongoChatStorage", # MongoDB implementation
     
     # Core exceptions
     "ARCException", "RpcError", "ParseError", "InvalidRequestError",

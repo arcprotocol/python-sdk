@@ -23,31 +23,51 @@ class ChatManager:
     """
     Manages active chat sessions for ARC real-time communication.
     
-    Provides functionality for:
-    - Creating and tracking chat sessions
-    - Sending messages in chats
-    - Closing chats
-    - Supporting SSE streaming
+    This manager creates and tracks chat session mappings between ARC chat_id 
+    and framework-specific thread identifiers. It does NOT store messages or
+    conversation state - frameworks handle that internally.
+    
+    Primary responsibilities:
+    - Creating chat_id ↔ framework_thread_id mappings
+    - Storing chat metadata (framework info, thread references)
+    - Managing chat lifecycle (ACTIVE/CLOSED status)
+    - Optional persistent storage (Redis, PostgreSQL, MongoDB)
+    - 24-hour retention for closed chats (for debugging/analytics)
+    
+    The framework (LangChain, LlamaIndex, etc.) stores actual messages and 
+    state using its own storage system, referenced by the thread_id.
     """
     
-    def __init__(self, agent_id: str):
+    def __init__(self, agent_id: str, storage: Optional[Any] = None):
         """
         Initialize chat manager.
         
         Args:
             agent_id: ID of this agent
+            storage: Optional ChatStorage implementation for persistent storage.
+                    If None, uses in-memory storage only (current behavior).
+                    If provided, uses dual-write: RAM (fast) + persistent storage.
         """
         self.agent_id = agent_id
         self.active_chats: Dict[str, Dict[str, Any]] = {}
+        self.storage = storage
+        
+        if storage:
+            logger.info(f"ChatManager initialized with persistent storage: {type(storage).__name__}")
+        else:
+            logger.info("ChatManager initialized with in-memory storage only")
     
-    def create_chat(self, target_agent: str, metadata: Optional[Dict[str, Any]] = None, 
+    async def create_chat(self, target_agent: str, metadata: Optional[Dict[str, Any]] = None, 
                    chat_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Create a new chat session.
         
+        This creates a mapping between ARC chat_id and framework-specific thread_id.
+        The framework stores actual messages and state internally.
+        
         Args:
             target_agent: ID of agent to communicate with
-            metadata: Optional chat metadata
+            metadata: Optional chat metadata (typically includes framework_thread_id)
             chat_id: Optional client-specified chat identifier
             
         Returns:
@@ -63,59 +83,79 @@ class ChatManager:
             "targetAgent": target_agent,
             "createdAt": created_at,
             "updatedAt": created_at,
-            "metadata": metadata or {},
-            "messages": [],
-            "participants": [self.agent_id, target_agent]
+            "metadata": metadata or {}
         }
         
+        # Store in RAM (fast access)
         self.active_chats[chat_id] = chat
+        
+        # Store in persistent storage if configured
+        if self.storage:
+            await self.storage.save(chat_id, chat)
+        
         logger.info(f"Created chat {chat_id} with {target_agent}")
         
         return {
             "chatId": chat_id,
             "status": "ACTIVE",
-            "participants": [self.agent_id, target_agent],
+            "targetAgent": target_agent,
             "createdAt": created_at
         }
     
-    def get_chat(self, chat_id: str) -> Dict[str, Any]:
+    async def get_chat(self, chat_id: str) -> Dict[str, Any]:
         """
-        Get chat information.
+        Get chat information including metadata.
         
         Args:
             chat_id: Chat identifier
             
         Returns:
-            Chat object
+            Chat object with metadata (includes framework_thread_id)
             
         Raises:
             ChatNotFoundError: If chat doesn't exist
         """
-        if chat_id not in self.active_chats:
-            raise ChatNotFoundError(chat_id, f"Chat not found: {chat_id}")
+        # Check RAM first (fast)
+        if chat_id in self.active_chats:
+            chat = self.active_chats[chat_id]
+            return {
+                "chatId": chat["chatId"],
+                "status": chat["status"],
+                "targetAgent": chat["targetAgent"],
+                "metadata": chat.get("metadata", {}),
+                "createdAt": chat["createdAt"],
+                "updatedAt": chat.get("updatedAt", chat["createdAt"])
+            }
         
-        chat = self.active_chats[chat_id]
+        # Check persistent storage if configured
+        if self.storage:
+            chat = await self.storage.get(chat_id)
+            if chat:
+                # Cache in RAM for future access
+                self.active_chats[chat_id] = chat
+                return {
+                    "chatId": chat["chatId"],
+                    "status": chat["status"],
+                    "targetAgent": chat["targetAgent"],
+                    "metadata": chat.get("metadata", {}),
+                    "createdAt": chat["createdAt"],
+                    "updatedAt": chat.get("updatedAt", chat["createdAt"])
+                }
         
-        return {
-            "chatId": chat["chatId"],
-            "status": chat["status"],
-            "targetAgent": chat["targetAgent"],
-            "participants": chat.get("participants", [self.agent_id, chat["targetAgent"]]),
-            "createdAt": chat["createdAt"],
-            "updatedAt": chat.get("updatedAt", chat["createdAt"])
-        }
+        # Not found in RAM or storage
+        raise ChatNotFoundError(chat_id, f"Chat not found: {chat_id}")
     
-    def add_message(
+    async def update_metadata(
         self, 
         chat_id: str, 
-        message: Dict[str, Any]
+        metadata: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Add a message to a chat.
+        Update chat metadata (e.g., framework_thread_id or other info).
         
         Args:
             chat_id: Chat identifier
-            message: Message to add
+            metadata: Metadata to merge with existing metadata
             
         Returns:
             Updated chat object
@@ -124,32 +164,32 @@ class ChatManager:
             ChatNotFoundError: If chat doesn't exist
             ChatAlreadyClosedError: If chat is closed
         """
-        if chat_id not in self.active_chats:
-            raise ChatNotFoundError(chat_id, f"Chat not found: {chat_id}")
-            
+        # Ensure chat is loaded (checks RAM, then storage)
+        await self.get_chat(chat_id)
+        
         chat = self.active_chats[chat_id]
         
         if chat["status"] == "CLOSED":
             raise ChatAlreadyClosedError(chat_id, f"Chat already closed: {chat_id}")
             
-        # Add timestamp if not provided
-        if "timestamp" not in message:
-            message["timestamp"] = self._get_timestamp()
-            
-        # Store message
-        chat["messages"].append(message)
+        # Merge metadata
+        chat["metadata"].update(metadata)
         chat["updatedAt"] = self._get_timestamp()
         
-        logger.debug(f"Added message to chat {chat_id}")
+        # Update persistent storage if configured
+        if self.storage:
+            await self.storage.save(chat_id, chat)
+        
+        logger.debug(f"Updated metadata for chat {chat_id}")
         
         return {
             "chatId": chat["chatId"],
-            "message": message,
+            "metadata": chat["metadata"],
             "status": chat["status"],
             "updatedAt": chat["updatedAt"]
         }
     
-    def close_chat(self, chat_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
+    async def close_chat(self, chat_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
         """
         Close a chat.
         
@@ -164,9 +204,9 @@ class ChatManager:
             ChatNotFoundError: If chat doesn't exist
             ChatAlreadyClosedError: If chat already closed
         """
-        if chat_id not in self.active_chats:
-            raise ChatNotFoundError(chat_id, f"Chat not found: {chat_id}")
-            
+        # Ensure chat is loaded (checks RAM, then storage)
+        await self.get_chat(chat_id)
+        
         chat = self.active_chats[chat_id]
         
         if chat["status"] == "CLOSED":
@@ -178,7 +218,11 @@ class ChatManager:
         
         if reason:
             chat["reason"] = reason
-            
+        
+        # Mark as closed in persistent storage with 24-hour TTL
+        if self.storage:
+            await self.storage.mark_closed(chat_id, ttl_seconds=86400)
+        
         logger.info(f"Closed chat {chat_id}")
         
         return {
@@ -188,30 +232,8 @@ class ChatManager:
             "reason": chat.get("reason")
         }
     
-    def get_messages(
-        self, 
-        chat_id: str
-    ) -> List[Dict[str, Any]]:
-        """
-        Get all messages in a chat.
-        
-        Args:
-            chat_id: Chat identifier
-            
-        Returns:
-            List of messages
-            
-        Raises:
-            ChatNotFoundError: If chat doesn't exist
-        """
-        if chat_id not in self.active_chats:
-            raise ChatNotFoundError(chat_id, f"Chat not found: {chat_id}")
-            
-        chat = self.active_chats[chat_id]
-        
-        return chat.get("messages", [])
     
-    def get_active_chats(self) -> List[Dict[str, Any]]:
+    async def get_active_chats(self) -> List[Dict[str, Any]]:
         """
         Get list of active chats.
         
@@ -220,6 +242,7 @@ class ChatManager:
         """
         active_chats = []
         
+        # Get from RAM
         for chat_id, chat in self.active_chats.items():
             if chat["status"] != "CLOSED":
                 active_chats.append({
@@ -228,18 +251,27 @@ class ChatManager:
                     "targetAgent": chat["targetAgent"],
                     "createdAt": chat["createdAt"]
                 })
+        
+        # If storage is configured, also get from storage (in case of chats not in RAM)
+        if self.storage:
+            storage_chats = await self.storage.list_active_chats()
+            # Add any chats from storage that aren't already in the list
+            ram_chat_ids = {chat["chatId"] for chat in active_chats}
+            for chat in storage_chats:
+                if chat["chatId"] not in ram_chat_ids:
+                    active_chats.append(chat)
                 
         return active_chats
     
-    def cleanup_old_chats(self, max_age_seconds: int = 3600) -> int:
+    async def cleanup_old_chats(self, max_age_seconds: int = 86400) -> int:
         """
-        Clean up old closed chats.
+        Clean up old closed chats from RAM and trigger storage cleanup.
         
         Args:
-            max_age_seconds: Maximum age in seconds for closed chats
+            max_age_seconds: Maximum age in seconds for closed chats (default: 86400 = 24 hours)
             
         Returns:
-            Number of chats cleaned up
+            Number of chats cleaned up from RAM
         """
         import time
         from datetime import datetime, timezone
@@ -248,6 +280,7 @@ class ChatManager:
         cleanup_count = 0
         chats_to_remove = []
         
+        # Clean up from RAM
         for chat_id, chat in self.active_chats.items():
             if chat["status"] != "CLOSED":
                 continue
@@ -270,12 +303,18 @@ class ChatManager:
                 chats_to_remove.append(chat_id)
                 cleanup_count += 1
                 
-        # Remove chats
+        # Remove chats from RAM
         for chat_id in chats_to_remove:
             del self.active_chats[chat_id]
+        
+        # Trigger storage cleanup if configured
+        # (For Redis/MongoDB this is no-op, for PostgreSQL it deletes expired chats)
+        if self.storage:
+            storage_cleanup_count = await self.storage.cleanup_expired_chats()
+            logger.info(f"Storage cleanup removed {storage_cleanup_count} expired chats")
             
         if cleanup_count > 0:
-            logger.info(f"Cleaned up {cleanup_count} old chats")
+            logger.info(f"Cleaned up {cleanup_count} old chats from RAM")
             
         return cleanup_count
     

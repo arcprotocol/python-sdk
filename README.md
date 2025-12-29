@@ -27,6 +27,7 @@ Single package with multiple deployment options:
 - **Cross-Agent Workflows** - Agent A → Agent B → Agent C with full traceability via `traceId`
 - **Agent Routing** - Built-in routing to target agents
 - **End-to-End Tracing** - Track workflows across agent interactions
+- **State Management** - Built-in chat session management with persistent storage (Redis, PostgreSQL, MongoDB)
 
 ### ARC vs Other Agent-to-Agent Protocols
 
@@ -116,6 +117,7 @@ server.run(host="0.0.0.0", port=8000)
 ## Documentation
 
 - [Protocol Specification](https://arc-protocol.org/spec)
+- [State Management Guide](docs/STATE_MANAGEMENT_GUIDE.md)
 - [Examples](https://github.com/arcprotocol/examples)
 
 ## License

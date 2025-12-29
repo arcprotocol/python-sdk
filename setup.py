@@ -159,7 +159,7 @@ class CustomDevelopCommand(develop):
 
 setup(
     name="arc-sdk",
-    version="1.3.0",
+    version="1.3.1",
     author="Moein Roghani",
     author_email="moein.roghani@proton.me",
     description="Python implementation of the Agent Remote Communication (ARC) Protocol",

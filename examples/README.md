@@ -2,18 +2,54 @@
 
 This directory contains examples and test scripts for the ARC Protocol Python SDK.
 
-## Server Examples
+## Quick Start
 
-The `server` directory contains an example server implementation that can be used to test the SDK locally.
-
-### Running the Test Server
+### 1. Start the Test Server
 
 ```bash
 cd examples/server
 python arc_test_server.py
 ```
 
-This will start a test server on `http://localhost:8000/arc` that implements all standard ARC Protocol methods and responds with realistic mock data.
+This will start a test server on `http://localhost:8000/arc`.
+
+### 2. Make Test Scripts Executable (One-Time Setup)
+
+```bash
+cd examples/client
+chmod +x test_*.py
+```
+
+### 3. Run Individual Tests
+
+Once executable, you can run tests directly:
+
+```bash
+# Start a chat
+./test_chat_start.py --message "Hello!"
+
+# Send a message (use the chat_id from previous command)
+./test_chat_message.py <chat_id> --message "Follow-up message"
+
+# End the chat
+./test_chat_end.py <chat_id> --reason "Done"
+
+# Create a task
+./test_task_create.py --message "Task description"
+
+# Get task info
+./test_task_info.py <task_id>
+
+# Send to task
+./test_task_send.py <task_id> --message "Additional info"
+
+# Cancel task
+./test_task_cancel.py <task_id> --reason "No longer needed"
+```
+
+## Server Examples
+
+The `server` directory contains an example server implementation that can be used to test the SDK locally.
 
 ## Client Examples
 
