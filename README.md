@@ -31,18 +31,19 @@ Single package with multiple deployment options:
 
 ### ARC vs Other Agent-to-Agent Protocols
 
-| Feature | **ARC Protocol** | **A2A (Google)** | **ACP (IBM/Linux Foundation)** |
-|---------|------------------|-------------------|--------------------------------|
-| **Streaming Model** | ✅ SSE (Server-Sent Events) | ✅ SSE downstream | ⚠️ Chunked HTTP, not duplex |
+| Feature | **ARC Protocol** | **A2A (Linux Foundation)** | **ACP (Linux Foundation)** |
+|---------|------------------|----------------------------|----------------------------|
+| **Streaming Model** | ✅ SSE (Server-Sent Events) | ✅ SSE + webhook registration | ⚠️ Chunked HTTP, not duplex |
 | **Transport** | ✅ HTTP/1.1 + SSE | ✅ HTTP/1.1 + SSE | ❌ HTTP/1.x only |
-| **Message Format** | ✅ JSON with structured parts | ✅ JSON with parts | ✅ JSON with MIME parts |
-| **Task Lifecycle** | ✅ Native task methods + webhooks | ⚠️ SSE + webhook registration | ⚠️ Client polling/resume |
-| **Multi-Agent Routing** | ✅ Single endpoint, built-in | ✅ Agent Card discovery | ⚠️ Manifest-based, looser |
-| **Agent Discovery** | ✅ Built-in agent routing | ✅ Agent Card system | ⚠️ Manifest-based discovery |
+| **Message Format** | ✅ JSON with structured parts | ✅ JSON-RPC with parts | ✅ JSON with MIME parts |
+| **Multi-Agent Routing** | ✅ Built-in `target_agent` field, single endpoint | ❌ Route by AgentCard URL selection | ⚠️ Manifest-based, looser |
+| **Agent Discovery** | ✅ Optional, works standalone | ⚠️ Requires AgentCard manifest | ⚠️ Requires manifest |
+| **Distributed Tracing** | ✅ First-class `traceId` in payload, integrates with third-party platforms (Langfuse, OTEL) | ⚠️ W3C Trace Context headers + metadata extensions | ⚠️ Custom implementation |
+| **Session/Thread Management** | ✅ Built-in thread management with persistent storage (Redis, PostgreSQL, MongoDB) | ⚠️ Via metadata extensions, implementation-dependent | ⚠️ Custom implementation |
 | **Error Handling** | ✅ Rich error taxonomy (500+ codes) | ⚠️ JSON-RPC error codes | ⚠️ HTTP status codes |
-| **Workflow Tracing** | ✅ Native `traceId` support | ⚠️ Custom implementation | ⚠️ Custom implementation |
+| **Post-Quantum Security** | ✅ Hybrid TLS (X25519 + Kyber-768) | ❌ Standard TLS 1.3+ only | ❌ Standard TLS only |
+| **Auth Mechanisms** | ✅ OAuth2, API Key, mTLS | ✅ OAuth2/OIDC, API Key, mTLS | ✅ Standard HTTP auth |
 | **Learning Curve** | ✅ Simple RPC-style | ✅ Familiar JSON-RPC | ✅ REST-like HTTP |
-| **Governance** | ✅ Open Protocol | ⚠️ Google-led | ✅ Linux Foundation |
 
 ## Installation
 
